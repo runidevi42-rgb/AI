@@ -1,0 +1,31 @@
+import 'dotenv/config';
+import { z } from 'zod';
+
+const schema = z.object({
+  NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
+  PORT: z.coerce.number().default(3000),
+  APP_URL: z.string().url().default('http://localhost:3000'),
+  CLIENT_URL: z.string().default('http://localhost:5173'),
+  COLLEGE_TIMEZONE: z.string().default('Asia/Kolkata'),
+  SUPABASE_URL: z.string().url(),
+  SUPABASE_SERVICE_ROLE_KEY: z.string().min(10),
+  GROQ_API_KEY: z.string().min(10),
+  GROQ_MODEL: z.string().default('llama-3.3-70b-versatile'),
+  WHATSAPP_ACCESS_TOKEN: z.string().min(10),
+  WHATSAPP_PHONE_NUMBER_ID: z.string().min(2),
+  WHATSAPP_VERIFY_TOKEN: z.string().min(8),
+  WHATSAPP_APP_SECRET: z.string().min(8),
+  WHATSAPP_API_VERSION: z.string().default('v23.0'),
+  JWT_SECRET: z.string().min(32),
+  ADMIN_EMAIL: z.string().email(),
+  ADMIN_PASSWORD: z.string().min(8),
+  SCHEDULER_ENABLED: z.string().default('true').transform((v) => v === 'true'),
+});
+
+const result = schema.safeParse(process.env);
+if (!result.success) {
+  console.error('Invalid environment configuration:', result.error.flatten().fieldErrors);
+  process.exit(1);
+}
+
+export const config = result.data;
