@@ -42,7 +42,7 @@ export async function retrieveContext(student: Record<string, any>, query: strin
   const intent = detectIntent(query);
   const today = new Date();
   const date = format(today, 'yyyy-MM-dd');
-  const scope = { department: student.department, semester: student.semester, section: student.section };
+  const scope = { department: student.department, semester: student.semester };
   let records: unknown[] = [];
 
   if (intent === 'timetable') {
@@ -87,7 +87,7 @@ export async function retrieveContext(student: Record<string, any>, query: strin
   return compact({
     intent,
     currentDate: format(today, 'EEEE, d MMMM yyyy'),
-    student: { name: student.full_name, rollNumber: student.roll_number, department: student.department, program: student.program, semester: student.semester, section: student.section },
+    student: { name: student.full_name, rollNumber: student.roll_number, department: student.department, course: student.course, semester: student.semester },
     records,
   });
 }

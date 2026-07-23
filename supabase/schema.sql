@@ -1,8 +1,9 @@
 create extension if not exists "pgcrypto";
 
 create table if not exists students (
-  id uuid primary key default gen_random_uuid(), phone text unique not null check (phone ~ '^[0-9]{8,15}$'), full_name text not null,
-  roll_number text unique not null, department text not null, program text not null, semester int not null check (semester between 1 and 12),
+  id uuid primary key default gen_random_uuid(), student_id text unique not null, full_name text not null,
+  whatsapp_number text unique not null check (whatsapp_number ~ '^[0-9]{8,15}$'),
+  roll_number int unique not null, department text not null, course text not null, semester int not null check (semester between 1 and 12),
   section text not null default 'A', email text, guardian_phone text, active boolean not null default true,
   whatsapp_opt_in boolean not null default true, created_at timestamptz not null default now(), updated_at timestamptz not null default now()
 );

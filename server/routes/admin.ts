@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { asyncHandler, AppError } from '../lib/errors.js';
+import { logger } from '../lib/logger.js';
 import { supabase } from '../lib/supabase.js';
 import { requireAdmin } from '../middleware/auth.js';
 import { dispatchNotification } from '../services/notifications.js';
@@ -17,7 +18,7 @@ const resource = (value: string) => {
 adminRouter.get('/dashboard', asyncHandler(async (_req, res) => {
   const now = new Date().toISOString();
   const [students, assignments, exams, notices, logs, activity] = await Promise.all([
-    supabase.from('students').select('*', { count: 'exact', head: true }).eq('active', true),
+    supabase.from('students').select('student_id', { count: 'exact', head: true }),
     supabase.from('assignments').select('*', { count: 'exact', head: true }).gte('due_at', now),
     supabase.from('exams').select('*', { count: 'exact', head: true }).gte('exam_date', now.slice(0, 10)),
     supabase.from('notices').select('*', { count: 'exact', head: true }).or(`expires_at.is.null,expires_at.gte.${now}`),
@@ -32,16 +33,43 @@ adminRouter.get('/dashboard', asyncHandler(async (_req, res) => {
 adminRouter.get('/:resource', asyncHandler(async (req, res) => {
   const table = resource(String(req.params.resource));
   const { page, pageSize, search } = z.object({ page: z.coerce.number().min(1).default(1), pageSize: z.coerce.number().min(1).max(100).default(20), search: z.string().optional() }).parse(req.query);
-  let query = supabase.from(table).select('*', { count: 'exact' });
-  if (search) {
-    const fields: Record<string, string[]> = { students: ['full_name','roll_number','phone'], faculty: ['full_name','department'], notices: ['title','content'], assignments: ['title','subject'], exams: ['title','subject'], events: ['title','venue'], study_materials: ['title','subject'], emergency_contacts: ['name','role'] };
+  const isStudents = table === 'students';
+  const columns = isStudents
+    ? 'student_id,full_name,whatsapp_number,roll_number,department,course,semester'
+    : '*';
+  let query = supabase.from(table).select(columns, { count: 'exact' });
+  const normalizedSearch = search?.trim().replace(/[%(),]/g, '') ?? '';
+
+  if (normalizedSearch) {
+    const fields: Record<string, string[]> = { students: ['student_id','full_name','whatsapp_number','department','course'], faculty: ['full_name','department'], notices: ['title','content'], assignments: ['title','subject'], exams: ['title','subject'], events: ['title','venue'], study_materials: ['title','subject'], emergency_contacts: ['name','role'] };
     const list = fields[table];
-    if (list) query = query.or(list.map((f) => `${f}.ilike.%${search.replace(/[%(),]/g, '')}%`).join(','));
+    if (list) query = query.or(list.map((field) => `${field}.ilike.%${normalizedSearch}%`).join(','));
   }
+
   const from = (page - 1) * pageSize;
-  const { data, error, count } = await query.order('created_at', { ascending: false }).range(from, from + pageSize - 1);
-  if (error) throw error;
-  res.json({ data, count: count ?? 0, page, pageSize });
+  const to = from + pageSize - 1;
+  const orderedQuery = isStudents
+    ? query.order('student_id', { ascending: true })
+    : query.order('created_at', { ascending: false });
+  const { data, error, count } = await orderedQuery.range(from, to);
+
+  if (error) {
+    logger.error({
+      table,
+      message: error.message,
+      code: error.code,
+      details: error.details,
+      hint: error.hint,
+    }, 'Supabase list query failed');
+    return res.status(500).json({
+      error: `Unable to load ${table}`,
+      code: error.code,
+      details: error.details,
+      hint: error.hint,
+    });
+  }
+
+  return res.json({ data: data ?? [], total: count ?? 0, page, pageSize });
 }));
 
 adminRouter.post('/:resource', asyncHandler(async (req, res) => {
@@ -125,18 +153,21 @@ adminRouter.post('/:resource', asyncHandler(async (req, res) => {
 
 adminRouter.put('/:resource/:id', asyncHandler(async (req, res) => {
   const table = resource(String(req.params.resource));
+  const primaryKey = table === 'students' ? 'student_id' : 'id';
   const changes = { ...req.body };
   delete changes.id;
   delete changes.created_at;
   delete changes.updated_at;
-  const { data, error } = await supabase.from(table).update({ ...changes, updated_at: new Date().toISOString() }).eq('id', req.params.id).select().single();
+  const payload = table === 'students' ? changes : { ...changes, updated_at: new Date().toISOString() };
+  const { data, error } = await supabase.from(table).update(payload).eq(primaryKey, req.params.id).select().single();
   if (error) throw new AppError(400, error.message);
   res.json(data);
 }));
 
 adminRouter.delete('/:resource/:id', asyncHandler(async (req, res) => {
   const table = resource(String(req.params.resource));
-  const { error } = await supabase.from(table).delete().eq('id', req.params.id);
+  const primaryKey = table === 'students' ? 'student_id' : 'id';
+  const { error } = await supabase.from(table).delete().eq(primaryKey, req.params.id);
   if (error) throw new AppError(400, error.message);
   res.sendStatus(204);
 }));

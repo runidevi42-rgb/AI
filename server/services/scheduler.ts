@@ -16,12 +16,12 @@ async function dailySchedules() {
   const now = new Date();
   const day = format(now, 'EEEE');
   await once(`daily-schedule:${format(now, 'yyyy-MM-dd')}`, async () => {
-    const { data: students } = await supabase.from('students').select('*').eq('active', true).eq('whatsapp_opt_in', true);
+    const { data: students } = await supabase.from('students').select('student_id,full_name,whatsapp_number,department,semester');
     for (const student of students ?? []) {
-      const { data: classes } = await supabase.from('timetables').select('start_time,end_time,subject,room').match({ department: student.department, semester: student.semester, section: student.section }).ilike('day_of_week', day).order('start_time');
+      const { data: classes } = await supabase.from('timetables').select('start_time,end_time,subject,room').match({ department: student.department, semester: student.semester }).ilike('day_of_week', day).order('start_time');
       if (!classes?.length) continue;
       const lines = classes.map((c) => `${c.start_time.slice(0,5)} - ${c.subject}${c.room ? ` (${c.room})` : ''}`);
-      await sendText(student.phone, `Good morning, ${student.full_name.split(' ')[0]}. Today's classes:\n${lines.join('\n')}`);
+      await sendText(student.whatsapp_number, `Good morning, ${student.full_name.split(' ')[0]}. Today's classes:\n${lines.join('\n')}`);
     }
   });
 }
@@ -32,8 +32,8 @@ async function deadlineReminders() {
   await once(`deadlines:${date}`, async () => {
     const { data: assignments } = await supabase.from('assignments').select('*').gte('due_at', `${date}T00:00:00`).lte('due_at', `${date}T23:59:59`);
     for (const assignment of assignments ?? []) {
-      const { data: students } = await supabase.from('students').select('phone').match({ department: assignment.department, semester: assignment.semester, active: true, whatsapp_opt_in: true });
-      await Promise.allSettled((students ?? []).map((s) => sendText(s.phone, `Reminder: ${assignment.title} (${assignment.subject}) is due tomorrow at ${new Date(assignment.due_at).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}.`)));
+      const { data: students } = await supabase.from('students').select('whatsapp_number').match({ department: assignment.department, semester: assignment.semester });
+      await Promise.allSettled((students ?? []).map((s) => sendText(s.whatsapp_number, `Reminder: ${assignment.title} (${assignment.subject}) is due tomorrow at ${new Date(assignment.due_at).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}.`)));
     }
   });
 }

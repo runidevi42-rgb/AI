@@ -4,7 +4,6 @@ export type ResourceName =
   | 'emergency_contacts' | 'college_info';
 
 export interface Student {
-  id: string;
   student_id: string;
   full_name: string;
   whatsapp_number: string;
@@ -12,7 +11,6 @@ export interface Student {
   department: string;
   course: string;
   semester: number;
-  created_at: string;
 }
 
 export interface DashboardStats {
@@ -27,7 +25,7 @@ export interface DashboardStats {
 
 export interface ApiList<T = Record<string, unknown>> {
   data: T[];
-  count: number;
+  total: number;
   page: number;
   pageSize: number;
 }
