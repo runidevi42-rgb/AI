@@ -46,9 +46,81 @@ adminRouter.get('/:resource', asyncHandler(async (req, res) => {
 
 adminRouter.post('/:resource', asyncHandler(async (req, res) => {
   const table = resource(String(req.params.resource));
-  const { data, error } = await supabase.from(table).insert(req.body).select().single();
-  if (error) throw new AppError(400, error.message);
-  res.status(201).json(data);
+
+  let payload = req.body;
+
+  if (table === 'students') {
+    const {
+      student_id,
+      full_name,
+      whatsapp_number,
+      roll_number,
+      department,
+      course,
+      semester,
+    } = req.body;
+
+    if (
+      !student_id ||
+      !full_name ||
+      !whatsapp_number ||
+      !roll_number ||
+      !department ||
+      !course ||
+      !semester
+    ) {
+      return res.status(400).json({
+        error: 'Missing required student fields',
+        requiredFields: [
+          'student_id',
+          'full_name',
+          'whatsapp_number',
+          'roll_number',
+          'department',
+          'course',
+          'semester',
+        ],
+      });
+    }
+
+    payload = {
+      student_id: String(student_id).trim(),
+      full_name: String(full_name).trim(),
+      whatsapp_number: String(whatsapp_number).replace(/\D/g, ''),
+      roll_number: Number(roll_number),
+      department: String(department).trim(),
+      course: String(course).trim(),
+      semester: Number(semester),
+    };
+
+    if (
+      !Number.isInteger(payload.roll_number) ||
+      !Number.isInteger(payload.semester)
+    ) {
+      return res.status(400).json({
+        error: 'roll_number and semester must be whole numbers',
+      });
+    }
+  }
+
+  const { data, error } = await supabase
+    .from(table)
+    .insert(payload)
+    .select()
+    .single();
+
+  if (error) {
+    console.error(`Insert error for ${table}:`, error);
+
+    return res.status(500).json({
+      error: error.message,
+      code: error.code,
+      details: error.details,
+      hint: error.hint,
+    });
+  }
+
+  return res.status(201).json(data);
 }));
 
 adminRouter.put('/:resource/:id', asyncHandler(async (req, res) => {

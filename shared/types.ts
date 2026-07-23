@@ -5,15 +5,13 @@ export type ResourceName =
 
 export interface Student {
   id: string;
-  phone: string;
+  student_id: string;
   full_name: string;
-  roll_number: string;
+  whatsapp_number: string;
+  roll_number: number;
   department: string;
-  program: string;
+  course: string;
   semester: number;
-  section: string;
-  active: boolean;
-  whatsapp_opt_in: boolean;
   created_at: string;
 }
 

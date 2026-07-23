@@ -18,8 +18,19 @@ export function detectIntent(query: string): Intent {
 }
 
 export async function findStudent(phone: string) {
-  const { data, error } = await supabase.from('students').select('*').eq('phone', phone).eq('active', true).maybeSingle();
-  if (error) throw error;
+  const normalizedPhone = String(phone).replace(/\D/g, '');
+
+  const { data, error } = await supabase
+    .from('students')
+    .select('*')
+    .eq('whatsapp_number', normalizedPhone)
+    .maybeSingle();
+
+  if (error) {
+    console.error('Student lookup error:', error);
+    throw error;
+  }
+
   return data;
 }
 
