@@ -1,7 +1,44 @@
 import { format, startOfDay } from 'date-fns';
+import { logger } from '../lib/logger.js';
 import { supabase } from '../lib/supabase.js';
+import { normalizePhone } from './whatsapp.js';
 
 export type Intent = 'timetable' | 'assignments' | 'exams' | 'attendance' | 'faculty' | 'events' | 'placements' | 'emergency' | 'materials' | 'general';
+export type ProfileIntent = 'name' | 'roll_number' | 'student_id' | 'profile';
+
+export interface StudentProfile {
+  student_id: string;
+  full_name: string;
+  whatsapp_number: string;
+  roll_number: number;
+  department: string;
+  course: string;
+  semester: number;
+}
+
+export function detectProfileIntent(query: string): ProfileIntent | null {
+  const normalized = query.toLowerCase().replace(/[?.!,'’]/g, ' ').replace(/\s+/g, ' ').trim();
+  if (/\b(my profile|my details|profile details|student profile|student details|show (me )?my profile|show (me )?my details)\b/.test(normalized)) return 'profile';
+  if (/\b(my student id|student id|student number)\b/.test(normalized)) return 'student_id';
+  if (/\b(my roll number|my roll no|roll number|roll no)\b/.test(normalized)) return 'roll_number';
+  if (/\b(what is my name|what s my name|tell me my name|who am i)\b/.test(normalized)) return 'name';
+  return null;
+}
+
+export function buildProfileResponse(student: StudentProfile, intent: ProfileIntent) {
+  if (intent === 'name') return `Your name is ${student.full_name}.`;
+  if (intent === 'roll_number') return `Your roll number is ${student.roll_number}.`;
+  if (intent === 'student_id') return `Your student ID is ${student.student_id}.`;
+  return [
+    '*Your student profile*',
+    `Name: ${student.full_name}`,
+    `Student ID: ${student.student_id}`,
+    `Roll number: ${student.roll_number}`,
+    `Course: ${student.course}`,
+    `Department: ${student.department}`,
+    `Semester: ${student.semester}`,
+  ].join('\n');
+}
 
 export function detectIntent(query: string): Intent {
   const q = query.toLowerCase();
@@ -18,27 +55,39 @@ export function detectIntent(query: string): Intent {
 }
 
 export async function findStudent(phone: string) {
-  const normalizedPhone = String(phone).replace(/\D/g, '');
+  const normalizedPhone = normalizePhone(phone);
 
   const { data, error } = await supabase
     .from('students')
-    .select('*')
+    .select('student_id,full_name,whatsapp_number,roll_number,department,course,semester')
     .eq('whatsapp_number', normalizedPhone)
     .maybeSingle();
 
   if (error) {
-    console.error('Student lookup error:', error);
+    logger.error({
+      senderNumber: normalizedPhone,
+      message: error.message,
+      code: error.code,
+      details: error.details,
+      hint: error.hint,
+    }, 'Student lookup failed');
     throw error;
   }
 
-  return data;
+  logger.info({
+    senderNumber: normalizedPhone,
+    matched: Boolean(data),
+    studentId: data?.student_id,
+  }, data ? 'Registered student matched' : 'No registered student matched');
+
+  return data as StudentProfile | null;
 }
 
 function compact(data: unknown) {
   return JSON.parse(JSON.stringify(data, (_key, value) => value === null || value === '' ? undefined : value));
 }
 
-export async function retrieveContext(student: Record<string, any>, query: string) {
+export async function retrieveContext(student: StudentProfile, query: string) {
   const intent = detectIntent(query);
   const today = new Date();
   const date = format(today, 'yyyy-MM-dd');
@@ -56,7 +105,7 @@ export async function retrieveContext(student: Record<string, any>, query: strin
     const { data } = await supabase.from('exams').select('title,subject,exam_date,start_time,end_time,room,instructions').eq('department', scope.department).eq('semester', scope.semester).gte('exam_date', date).order('exam_date').limit(12);
     records = data ?? [];
   } else if (intent === 'attendance') {
-    const { data } = await supabase.from('attendance_summary').select('subject,total_classes,present_classes,percentage').eq('student_id', student.id).order('subject');
+    const { data } = await supabase.from('attendance_summary').select('subject,total_classes,present_classes,percentage').eq('student_id', student.student_id).order('subject');
     records = data ?? [];
   } else if (intent === 'faculty') {
     const { data } = await supabase.from('faculty').select('full_name,designation,department,email,phone,office,office_hours').eq('active', true).or(`department.eq.${scope.department},department.eq.General`).limit(20);

@@ -50,6 +50,10 @@ begin
   end if;
 end $$;
 
+update public.students
+set whatsapp_number = regexp_replace(whatsapp_number, '\D', '', 'g')
+where whatsapp_number is distinct from regexp_replace(whatsapp_number, '\D', '', 'g');
+
 alter table public.students
   alter column roll_number type integer
   using roll_number::integer;

@@ -3,9 +3,8 @@ import crypto from 'node:crypto';
 import { config } from '../config.js';
 import { asyncHandler } from '../lib/errors.js';
 import { logger } from '../lib/logger.js';
-import { supabase } from '../lib/supabase.js';
 import { answerStudent } from '../services/assistant.js';
-import { sendText } from '../services/whatsapp.js';
+import { normalizePhone, sendText } from '../services/whatsapp.js';
 
 export const webhookRouter = Router();
 
@@ -29,21 +28,28 @@ webhookRouter.get('/', (req, res) => {
 webhookRouter.post('/', asyncHandler(async (req, res) => {
   res.sendStatus(200);
   const value = req.body?.entry?.[0]?.changes?.[0]?.value;
-  const statuses = value?.statuses ?? [];
-  for (const status of statuses) {
-    await supabase.from('message_logs').update({ status: status.status, updated_at: new Date().toISOString() }).eq('provider_message_id', status.id);
+
+  const messages = Array.isArray(value?.messages) ? value.messages : [];
+  if (!messages.length) {
+    logger.debug({ eventType: value?.statuses ? 'message_status' : 'non_message' }, 'Ignored WhatsApp webhook event');
+    return;
   }
-  for (const item of value?.messages ?? []) {
-    if (item.type !== 'text') {
-      await sendText(item.from, 'I can currently help with text messages. Please type your question.');
-      continue;
+
+  await Promise.allSettled(messages.map(async (item: { id?: string; from?: string; type?: string; text?: { body?: string } }) => {
+    if (item.type !== 'text' || !item.from || typeof item.text?.body !== 'string') {
+      logger.debug({ messageId: item.id, messageType: item.type }, 'Ignored non-text WhatsApp message');
+      return;
     }
+
+    const senderNumber = normalizePhone(item.from);
+    logger.info({ senderNumber, messageId: item.id }, 'Incoming WhatsApp text message');
+
     try {
-      const reply = await answerStudent(item.from, item.text.body);
-      await sendText(item.from, reply.text);
+      const reply = await answerStudent(senderNumber, item.text.body);
+      await sendText(senderNumber, reply.text);
     } catch (error) {
       logger.error({ err: error, messageId: item.id }, 'Could not process incoming message');
-      await sendText(item.from, 'I am having trouble accessing college information right now. Please try again shortly.');
+      await sendText(senderNumber, 'I am having trouble accessing college information right now. Please try again shortly.');
     }
-  }
+  }));
 }));

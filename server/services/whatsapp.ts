@@ -5,7 +5,13 @@ import { supabase } from '../lib/supabase.js';
 const endpoint = `https://graph.facebook.com/${config.WHATSAPP_API_VERSION}/${config.WHATSAPP_PHONE_NUMBER_ID}/messages`;
 
 export function normalizePhone(value: string) {
-  return value.replace(/\D/g, '').replace(/^00/, '');
+  return String(value).replace(/\D/g, '').replace(/^00/, '');
+}
+
+function recordDelivery(payload: Record<string, unknown>) {
+  void supabase.from('message_logs').insert(payload).then(({ error }) => {
+    if (error) logger.warn({ message: error.message, code: error.code }, 'WhatsApp delivery log failed');
+  });
 }
 
 async function send(payload: Record<string, unknown>) {
@@ -21,12 +27,13 @@ async function send(payload: Record<string, unknown>) {
 
 export async function sendText(to: string, text: string, notificationId?: string) {
   try {
-    const result = await send({ to: normalizePhone(to), type: 'text', text: { preview_url: false, body: text.slice(0, 4096) } });
-    await supabase.from('message_logs').insert({ phone: normalizePhone(to), direction: 'outbound', message: text, status: 'sent', notification_id: notificationId, provider_message_id: (result.messages as Array<{ id: string }> | undefined)?.[0]?.id });
+    const normalizedTo = normalizePhone(to);
+    const result = await send({ to: normalizedTo, type: 'text', text: { preview_url: false, body: text.slice(0, 4096) } });
+    recordDelivery({ phone: normalizedTo, direction: 'outbound', message: text, status: 'sent', notification_id: notificationId, provider_message_id: (result.messages as Array<{ id: string }> | undefined)?.[0]?.id });
     return result;
   } catch (error) {
     logger.error({ err: error }, 'WhatsApp delivery failed');
-    await supabase.from('message_logs').insert({ phone: normalizePhone(to), direction: 'outbound', message: text, status: 'failed', error: error instanceof Error ? error.message : 'Unknown error', notification_id: notificationId });
+    recordDelivery({ phone: normalizePhone(to), direction: 'outbound', message: text, status: 'failed', error: error instanceof Error ? error.message : 'Unknown error', notification_id: notificationId });
     throw error;
   }
 }
