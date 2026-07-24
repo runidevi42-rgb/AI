@@ -4,7 +4,7 @@ import { z } from 'zod';
 const schema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   PORT: z.coerce.number().default(3000),
-  APP_URL: z.string().url().default('http://localhost:3000'),
+  APP_URL: z.string().url().default(process.env.RENDER_EXTERNAL_URL ?? 'http://localhost:3000'),
   CLIENT_URL: z.string().default('http://localhost:5173'),
   COLLEGE_TIMEZONE: z.string().default('Asia/Kolkata'),
   SUPABASE_URL: z.string().url(),
