@@ -22,7 +22,7 @@ describe('normalizePhone', () => {
 
 describe('profile questions', () => {
   const student: StudentProfile = {
-    student_id: 'STU001',
+    student_id: 1001,
     full_name: 'Sumit Kumar',
     whatsapp_number: '919876543210',
     roll_number: 101,
@@ -48,7 +48,7 @@ describe('profile questions', () => {
   it('builds a complete verified profile response', () => {
     const response = buildProfileResponse(student, 'profile');
     expect(response).toContain('Sumit Kumar');
-    expect(response).toContain('STU001');
+    expect(response).toContain('1001');
     expect(response).toContain('101');
     expect(response).toContain('Computer Science');
     expect(response).toContain('BCA');

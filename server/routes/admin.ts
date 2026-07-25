@@ -5,11 +5,12 @@ import { logger } from '../lib/logger.js';
 import { supabase } from '../lib/supabase.js';
 import { requireAdmin } from '../middleware/auth.js';
 import { dispatchNotification } from '../services/notifications.js';
+import { validatedPayload } from './admin-validation.js';
 
 export const adminRouter = Router();
 adminRouter.use(requireAdmin);
 
-const resources = new Set(['students','timetables','assignments','exams','attendance','faculty','notices','events','study_materials','emergency_contacts','college_info','faqs','notifications']);
+const resources = new Set(['students','timetables','assignments','exams','attendance','faculty','notices','events','emergency_contacts','college_info','faqs','notifications']);
 const resource = (value: string) => {
   if (!resources.has(value)) throw new AppError(404, 'Unknown resource');
   return value;
@@ -34,14 +35,19 @@ adminRouter.get('/:resource', asyncHandler(async (req, res) => {
   const table = resource(String(req.params.resource));
   const { page, pageSize, search } = z.object({ page: z.coerce.number().min(1).default(1), pageSize: z.coerce.number().min(1).max(100).default(20), search: z.string().optional() }).parse(req.query);
   const isStudents = table === 'students';
-  const columns = isStudents
-    ? 'student_id,full_name,whatsapp_number,roll_number,department,course,semester'
-    : '*';
+  const selectedColumns: Record<string, string> = {
+    students: 'student_id,full_name,whatsapp_number,roll_number,department,course,semester',
+    assignments: 'id,title,subject,description,department,semester,due_at,created_at,updated_at',
+    exams: 'id,title,subject,department,semester,exam_date,start_time,end_time,instructions,created_at,updated_at',
+    college_info: 'id,title,content,category,created_at,updated_at',
+    emergency_contacts: 'id,contact_name,phone_number,role_or_service,emergency_type,description,priority,active,contact_type,created_at,updated_at',
+  };
+  const columns = selectedColumns[table] ?? '*';
   let query = supabase.from(table).select(columns, { count: 'exact' });
   const normalizedSearch = search?.trim().replace(/[%(),]/g, '') ?? '';
 
   if (normalizedSearch) {
-    const fields: Record<string, string[]> = { students: ['student_id','full_name','whatsapp_number','department','course'], faculty: ['full_name','department'], notices: ['title','content'], assignments: ['title','subject'], exams: ['title','subject'], events: ['title','venue'], study_materials: ['title','subject'], emergency_contacts: ['name','role'] };
+    const fields: Record<string, string[]> = { students: ['student_id','full_name','whatsapp_number','department','course'], faculty: ['full_name','department'], notices: ['title','content'], assignments: ['title','subject','department'], exams: ['title','subject','department'], events: ['title','venue'], emergency_contacts: ['contact_name','phone_number','role_or_service','emergency_type'] };
     const list = fields[table];
     if (list) query = query.or(list.map((field) => `${field}.ilike.%${normalizedSearch}%`).join(','));
   }
@@ -50,7 +56,9 @@ adminRouter.get('/:resource', asyncHandler(async (req, res) => {
   const to = from + pageSize - 1;
   const orderedQuery = isStudents
     ? query.order('student_id', { ascending: true })
-    : query.order('created_at', { ascending: false });
+    : table === 'emergency_contacts'
+      ? query.order('priority', { ascending: true })
+      : query.order('created_at', { ascending: false });
   const { data, error, count } = await orderedQuery.range(from, to);
 
   if (error) {
@@ -75,7 +83,7 @@ adminRouter.get('/:resource', asyncHandler(async (req, res) => {
 adminRouter.post('/:resource', asyncHandler(async (req, res) => {
   const table = resource(String(req.params.resource));
 
-  let payload = req.body;
+  let payload = validatedPayload(table, req.body);
 
   if (table === 'students') {
     const {
@@ -111,22 +119,29 @@ adminRouter.post('/:resource', asyncHandler(async (req, res) => {
       });
     }
 
+    const normalizedStudentId = Number(student_id);
+    const normalizedRollNumber = Number(roll_number);
+    const normalizedSemester = Number(semester);
+
     payload = {
-      student_id: String(student_id).trim(),
+      student_id: normalizedStudentId,
       full_name: String(full_name).trim(),
       whatsapp_number: String(whatsapp_number).replace(/\D/g, ''),
-      roll_number: Number(roll_number),
+      roll_number: normalizedRollNumber,
       department: String(department).trim(),
       course: String(course).trim(),
-      semester: Number(semester),
+      semester: normalizedSemester,
     };
 
     if (
-      !Number.isInteger(payload.roll_number) ||
-      !Number.isInteger(payload.semester)
+      !Number.isInteger(normalizedStudentId) ||
+      !Number.isSafeInteger(normalizedStudentId) ||
+      normalizedStudentId <= 0 ||
+      !Number.isInteger(normalizedRollNumber) ||
+      !Number.isInteger(normalizedSemester)
     ) {
       return res.status(400).json({
-        error: 'roll_number and semester must be whole numbers',
+        error: 'student_id, roll_number and semester must be valid whole numbers',
       });
     }
   }
@@ -154,7 +169,7 @@ adminRouter.post('/:resource', asyncHandler(async (req, res) => {
 adminRouter.put('/:resource/:id', asyncHandler(async (req, res) => {
   const table = resource(String(req.params.resource));
   const primaryKey = table === 'students' ? 'student_id' : 'id';
-  const changes = { ...req.body };
+  const changes = { ...validatedPayload(table, req.body) } as Record<string, unknown>;
   delete changes.id;
   delete changes.created_at;
   delete changes.updated_at;

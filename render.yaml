@@ -2,7 +2,7 @@ services:
   - type: web
     name: campusmate-ai
     runtime: node
-    plan: starter
+    plan: free
     buildCommand: npm ci && npm run build
     startCommand: npm start
     healthCheckPath: /api/health
@@ -25,7 +25,7 @@ services:
       - key: WHATSAPP_PHONE_NUMBER_ID
         sync: false
       - key: WHATSAPP_VERIFY_TOKEN
-        generateValue: true
+        sync: false
       - key: WHATSAPP_APP_SECRET
         sync: false
       - key: JWT_SECRET

@@ -3,11 +3,11 @@ import { logger } from '../lib/logger.js';
 import { supabase } from '../lib/supabase.js';
 import { normalizePhone } from './whatsapp.js';
 
-export type Intent = 'timetable' | 'assignments' | 'exams' | 'attendance' | 'faculty' | 'events' | 'placements' | 'emergency' | 'materials' | 'general';
+export type Intent = 'timetable' | 'assignments' | 'exams' | 'attendance' | 'faculty' | 'events' | 'placements' | 'emergency' | 'general';
 export type ProfileIntent = 'name' | 'roll_number' | 'student_id' | 'profile';
 
 export interface StudentProfile {
-  student_id: string;
+  student_id: number;
   full_name: string;
   whatsapp_number: string;
   roll_number: number;
@@ -50,7 +50,6 @@ export function detectIntent(query: string): Intent {
   if (/event|holiday|fest|workshop|seminar/.test(q)) return 'events';
   if (/placement|internship|job|career|company/.test(q)) return 'placements';
   if (/emergency|ambulance|security|help|ragging|contact/.test(q)) return 'emergency';
-  if (/note|material|resource|pdf|study/.test(q)) return 'materials';
   return 'general';
 }
 
@@ -99,10 +98,10 @@ export async function retrieveContext(student: StudentProfile, query: string) {
     const { data } = await supabase.from('timetables').select('day_of_week,start_time,end_time,subject,room,faculty:faculty(full_name)').match(scope).ilike('day_of_week', day).order('start_time');
     records = data ?? [];
   } else if (intent === 'assignments') {
-    const { data } = await supabase.from('assignments').select('title,subject,description,due_at,max_marks,submission_url').eq('department', scope.department).eq('semester', scope.semester).gte('due_at', today.toISOString()).order('due_at').limit(10);
+    const { data } = await supabase.from('assignments').select('title,subject,description,due_at').eq('department', scope.department).eq('semester', scope.semester).gte('due_at', today.toISOString()).order('due_at').limit(10);
     records = data ?? [];
   } else if (intent === 'exams') {
-    const { data } = await supabase.from('exams').select('title,subject,exam_date,start_time,end_time,room,instructions').eq('department', scope.department).eq('semester', scope.semester).gte('exam_date', date).order('exam_date').limit(12);
+    const { data } = await supabase.from('exams').select('title,subject,exam_date,start_time,end_time,instructions').eq('department', scope.department).eq('semester', scope.semester).gte('exam_date', date).order('exam_date').limit(12);
     records = data ?? [];
   } else if (intent === 'attendance') {
     const { data } = await supabase.from('attendance_summary').select('subject,total_classes,present_classes,percentage').eq('student_id', student.student_id).order('subject');
@@ -120,14 +119,11 @@ export async function retrieveContext(student: StudentProfile, query: string) {
     const { data } = await supabase.from('notices').select('title,content,category,published_at,expires_at').in('category', ['placement', 'internship']).or(`expires_at.is.null,expires_at.gte.${today.toISOString()}`).order('published_at', { ascending: false }).limit(10);
     records = data ?? [];
   } else if (intent === 'emergency') {
-    const { data } = await supabase.from('emergency_contacts').select('name,role,phone,email,available_hours,priority').eq('active', true).order('priority').limit(15);
-    records = data ?? [];
-  } else if (intent === 'materials') {
-    const { data } = await supabase.from('study_materials').select('title,subject,description,file_url,material_type,uploaded_at').eq('department', scope.department).eq('semester', scope.semester).order('uploaded_at', { ascending: false }).limit(12);
+    const { data } = await supabase.from('emergency_contacts').select('contact_name,phone_number,role_or_service,emergency_type,description,priority,contact_type').eq('active', true).order('priority').limit(30);
     records = data ?? [];
   } else {
     const [{ data: info }, { data: faq }] = await Promise.all([
-      supabase.from('college_info').select('key,title,content,category').limit(20),
+      supabase.from('college_info').select('title,content,category').limit(20),
       supabase.from('faqs').select('question,answer,category').limit(20),
     ]);
     records = [...(info ?? []), ...(faq ?? [])];

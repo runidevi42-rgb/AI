@@ -30,7 +30,7 @@ async function deadlineReminders() {
   const tomorrow = addDays(new Date(), 1);
   const date = format(tomorrow, 'yyyy-MM-dd');
   await once(`deadlines:${date}`, async () => {
-    const { data: assignments } = await supabase.from('assignments').select('*').gte('due_at', `${date}T00:00:00`).lte('due_at', `${date}T23:59:59`);
+    const { data: assignments } = await supabase.from('assignments').select('id,title,subject,description,department,semester,due_at').gte('due_at', `${date}T00:00:00`).lte('due_at', `${date}T23:59:59`);
     for (const assignment of assignments ?? []) {
       const { data: students } = await supabase.from('students').select('whatsapp_number').match({ department: assignment.department, semester: assignment.semester });
       await Promise.allSettled((students ?? []).map((s) => sendText(s.whatsapp_number, `Reminder: ${assignment.title} (${assignment.subject}) is due tomorrow at ${new Date(assignment.due_at).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}.`)));

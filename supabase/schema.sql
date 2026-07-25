@@ -25,12 +25,12 @@ create index if not exists timetables_scope_idx on timetables(department, semest
 
 create table if not exists assignments (
   id uuid primary key default gen_random_uuid(), title text not null, subject text not null, description text,
-  department text not null, semester int not null, section text, due_at timestamptz not null, max_marks numeric,
-  submission_url text, created_at timestamptz not null default now(), updated_at timestamptz not null default now()
+  department text not null, semester int not null, due_at timestamptz not null,
+  created_at timestamptz not null default now(), updated_at timestamptz not null default now()
 );
 create table if not exists exams (
   id uuid primary key default gen_random_uuid(), title text not null, subject text not null, department text not null,
-  semester int not null, exam_date date not null, start_time time not null, end_time time not null, room text, instructions text,
+  semester int not null, exam_date date not null, start_time time not null, end_time time not null, instructions text,
   created_at timestamptz not null default now(), updated_at timestamptz not null default now()
 );
 create table if not exists attendance (
@@ -55,18 +55,15 @@ create table if not exists events (
   start_at timestamptz not null, end_at timestamptz not null, venue text, department text,
   created_at timestamptz not null default now(), updated_at timestamptz not null default now()
 );
-create table if not exists study_materials (
-  id uuid primary key default gen_random_uuid(), title text not null, subject text not null, description text,
-  department text not null, semester int not null, material_type text not null default 'document', file_url text not null,
-  uploaded_at timestamptz not null default now(), created_at timestamptz not null default now(), updated_at timestamptz not null default now()
-);
 create table if not exists emergency_contacts (
-  id uuid primary key default gen_random_uuid(), name text not null, role text not null, phone text not null, email text,
-  available_hours text default '24/7', priority int not null default 10, active boolean not null default true,
+  id uuid primary key default gen_random_uuid(), contact_name text not null, phone_number text not null,
+  role_or_service text not null, emergency_type text not null, description text not null,
+  priority int not null default 10, active boolean not null default true,
+  contact_type text not null check (contact_type in ('faculty','public_service')),
   created_at timestamptz not null default now(), updated_at timestamptz not null default now()
 );
 create table if not exists college_info (
-  id uuid primary key default gen_random_uuid(), key text unique not null, title text not null, content text not null, category text not null default 'general',
+  id uuid primary key default gen_random_uuid(), title text not null, content text not null, category text not null default 'general',
   created_at timestamptz not null default now(), updated_at timestamptz not null default now()
 );
 create table if not exists faqs (

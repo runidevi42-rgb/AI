@@ -42,6 +42,7 @@ webhookRouter.post('/', asyncHandler(async (req, res) => {
     }
 
     const senderNumber = normalizePhone(item.from);
+    console.log('Incoming WhatsApp phone:', senderNumber);
     logger.info({ senderNumber, messageId: item.id }, 'Incoming WhatsApp text message');
 
     try {

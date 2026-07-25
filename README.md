@@ -6,7 +6,7 @@ CampusMate is a WhatsApp-first college assistant with a responsive administratio
 
 - WhatsApp Cloud API webhook verification, inbound messages, delivery status handling, and outbound replies
 - Student phone authentication and student-scoped academic information
-- Grounded Groq responses for timetables, assignments, exams, attendance, faculty, events, placements, study materials, emergencies, and FAQs
+- Grounded Groq responses for timetables, assignments, exams, attendance, faculty, events, placements, emergencies, and FAQs
 - Admin dashboard with CRUD management for students and college data
 - Targeted or college-wide WhatsApp notifications
 - Daily schedule and next-day assignment reminder jobs with idempotency protection

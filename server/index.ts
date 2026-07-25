@@ -12,6 +12,7 @@ import { authRouter } from './routes/auth.js';
 import { adminRouter } from './routes/admin.js';
 import { webhookRouter } from './routes/webhook.js';
 import { startScheduler } from './services/scheduler.js';
+import { assertDatabaseConnection } from './lib/supabase.js';
 
 const app = express();
 app.set('trust proxy', 1);
@@ -22,7 +23,20 @@ app.use(pinoHttp({ logger }));
 app.use('/api/auth', rateLimit({ windowMs: 15 * 60_000, limit: 30 }), authRouter);
 app.use('/api/admin', rateLimit({ windowMs: 60_000, limit: 300 }), adminRouter);
 app.use('/webhook/whatsapp', webhookRouter);
+app.get('/', (_req, res) => res.json({
+  status: 'ok',
+  service: 'CampusMate AI backend',
+  health: '/api/health',
+}));
 app.get('/api/health', (_req, res) => res.json({ status: 'ok', service: 'campusmate-api', timestamp: new Date().toISOString() }));
+app.get('/api/health/database', async (_req, res) => {
+  try {
+    await assertDatabaseConnection();
+    res.json({ status: 'ok', database: 'connected' });
+  } catch {
+    res.status(503).json({ status: 'error', database: 'unavailable or incomplete' });
+  }
+});
 
 if (config.NODE_ENV === 'production') {
   const dirname = path.dirname(fileURLToPath(import.meta.url));
