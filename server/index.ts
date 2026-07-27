@@ -15,9 +15,18 @@ import { startScheduler } from './services/scheduler.js';
 import { assertDatabaseConnection } from './lib/supabase.js';
 
 const app = express();
+const allowedOrigins = new Set([
+  config.APP_URL,
+  ...config.CLIENT_URL.split(',').map((origin) => origin.trim()),
+].filter(Boolean));
+
 app.set('trust proxy', 1);
 app.use(helmet({ contentSecurityPolicy: config.NODE_ENV === 'production' ? undefined : false }));
-app.use(cors({ origin: config.NODE_ENV === 'production' ? config.APP_URL : config.CLIENT_URL }));
+app.use(cors({
+  origin(origin, callback) {
+    callback(null, !origin || allowedOrigins.has(origin));
+  },
+}));
 app.use(express.json({ limit: '1mb', verify: (req, _res, buffer) => { (req as express.Request & { rawBody?: Buffer }).rawBody = Buffer.from(buffer); } }));
 app.use(pinoHttp({ logger }));
 app.use('/api/auth', rateLimit({ windowMs: 15 * 60_000, limit: 30 }), authRouter);
@@ -39,6 +48,8 @@ app.get('/api/health/database', async (_req, res) => {
     res.status(503).json({ status: 'error', database: 'unavailable or incomplete' });
   }
 });
+app.use('/api', (_req, res) => res.status(404).json({ error: 'API route not found' }));
+app.use('/webhook', (_req, res) => res.status(404).json({ error: 'Webhook route not found' }));
 
 if (config.NODE_ENV === 'production') {
   const dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -48,7 +59,7 @@ if (config.NODE_ENV === 'production') {
 }
 app.use(errorHandler);
 
-app.listen(config.PORT, () => {
+app.listen(config.PORT, '0.0.0.0', () => {
   logger.info({ port: config.PORT }, 'CampusMate server started');
   startScheduler();
 });
