@@ -6,6 +6,18 @@ begin;
 
 create extension if not exists "pgcrypto";
 
+-- Core student identity used by the website, WhatsApp lookup, attendance,
+-- notifications, and scheduled reminders.
+create table if not exists public.students (
+  student_id bigint primary key,
+  full_name text not null,
+  whatsapp_number text not null unique,
+  roll_number integer not null unique,
+  department text not null,
+  course text not null,
+  semester integer not null check (semester between 1 and 12)
+);
+
 -- The live table contains student_id but may not have a declared primary/unique
 -- constraint. A non-partial unique index is valid as a foreign-key target.
 create unique index if not exists students_student_id_unique_idx
@@ -207,9 +219,22 @@ create index if not exists assignments_scope_idx on public.assignments(departmen
 create index if not exists exams_scope_idx on public.exams(department, semester, exam_date);
 create index if not exists message_provider_idx on public.message_logs(provider_message_id);
 
--- Backend access uses the service role. These policies prevent anonymous reads.
+-- The browser does not query Supabase directly. Enabling RLS without public
+-- policies blocks anon/authenticated access while the backend service role
+-- continues to operate through its normal RLS bypass.
 alter table public.students enable row level security;
+alter table public.timetables enable row level security;
+alter table public.assignments enable row level security;
+alter table public.exams enable row level security;
 alter table public.attendance enable row level security;
+alter table public.faculty enable row level security;
+alter table public.notices enable row level security;
+alter table public.events enable row level security;
+alter table public.emergency_contacts enable row level security;
+alter table public.college_info enable row level security;
+alter table public.faqs enable row level security;
+alter table public.notifications enable row level security;
 alter table public.message_logs enable row level security;
+alter table public.scheduled_job_runs enable row level security;
 
 commit;
