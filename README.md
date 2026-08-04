@@ -60,6 +60,7 @@ frontend code uses relative API paths in development and production.
 npm run dev           # Vite and the TypeScript backend watcher
 npm run dev:web       # Vite only
 npm run dev:server    # backend watcher only
+npm run clean         # remove generated production output
 npm run build:client  # Vite -> dist/
 npm run build:server  # TypeScript -> dist-server/
 npm run build         # complete production build
@@ -107,7 +108,7 @@ The standard commands for Railway, Render, Koyeb, and similar Node platforms
 are:
 
 ```text
-Build command: npm ci && npm run build
+Build command: npm ci --include=dev && npm run build
 Start command: npm start
 Health check: /api/health
 ```
@@ -120,7 +121,7 @@ do not hardcode it. The server binds to `0.0.0.0`.
 1. Push the repository to GitHub.
 2. In Railway, select **New Project** and **Deploy from GitHub repo**.
 3. Select this repository and its production branch.
-4. Set the build command to `npm ci && npm run build`.
+4. Set the build command to `npm ci --include=dev && npm run build`.
 5. Set the start command to `npm start`.
 6. Add all required backend environment variables from `.env.example`.
 7. Set `NODE_ENV=production` and `SCHEDULER_ENABLED=true`.

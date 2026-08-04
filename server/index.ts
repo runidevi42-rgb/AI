@@ -1,7 +1,7 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import express from 'express';
-import cors from 'cors';
+import cors, { type CorsOptions } from 'cors';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import { pinoHttp } from 'pino-http';
@@ -19,14 +19,15 @@ const allowedOrigins = new Set([
   config.APP_URL,
   ...config.CLIENT_URL.split(',').map((origin) => origin.trim()),
 ].filter(Boolean));
+const corsOptions: CorsOptions = {
+  origin(origin: string | undefined, callback: (error: Error | null, allow?: boolean) => void) {
+    callback(null, !origin || allowedOrigins.has(origin));
+  },
+};
 
 app.set('trust proxy', 1);
 app.use(helmet({ contentSecurityPolicy: config.NODE_ENV === 'production' ? undefined : false }));
-app.use(cors({
-  origin(origin, callback) {
-    callback(null, !origin || allowedOrigins.has(origin));
-  },
-}));
+app.use(cors(corsOptions));
 app.use(express.json({ limit: '1mb', verify: (req, _res, buffer) => { (req as express.Request & { rawBody?: Buffer }).rawBody = Buffer.from(buffer); } }));
 app.use(pinoHttp({ logger }));
 app.use('/api/auth', rateLimit({ windowMs: 15 * 60_000, limit: 30 }), authRouter);
