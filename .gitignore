@@ -9,3 +9,4 @@ dist-server
 .DS_Store
 .vite
 coverage
+backups/
