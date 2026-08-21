@@ -4,7 +4,7 @@ import { config } from '../config.js';
 import { asyncHandler } from '../lib/errors.js';
 import { logger } from '../lib/logger.js';
 import { answerStudent } from '../services/assistant.js';
-import { normalizePhone, sendText } from '../services/whatsapp.js';
+import { normalizePhone, recordMessageStatus, sendText } from '../services/whatsapp.js';
 
 export const webhookRouter = Router();
 
@@ -28,6 +28,11 @@ webhookRouter.get('/', (req, res) => {
 webhookRouter.post('/', asyncHandler(async (req, res) => {
   res.sendStatus(200);
   const value = req.body?.entry?.[0]?.changes?.[0]?.value;
+
+  const statuses = Array.isArray(value?.statuses) ? value.statuses : [];
+  if (statuses.length) {
+    await Promise.allSettled(statuses.map((status: { id?: string; status?: string; timestamp?: string; errors?: unknown }) => recordMessageStatus(status)));
+  }
 
   const messages = Array.isArray(value?.messages) ? value.messages : [];
   if (!messages.length) {

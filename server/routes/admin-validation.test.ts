@@ -2,6 +2,37 @@ import { describe, expect, it } from 'vitest';
 import { validatedPayload } from './admin-validation.js';
 
 describe('admin resource validation', () => {
+  it('normalizes a valid attendance record', () => {
+    expect(validatedPayload('attendance', {
+      student_id: '101', subject: 'Mathematics', attendance_date: '2026-08-21', status: 'present', ignored: true,
+    })).toEqual({ student_id: 101, subject: 'Mathematics', attendance_date: '2026-08-21', status: 'present' });
+  });
+
+  it('rejects unsupported attendance states', () => {
+    expect(() => validatedPayload('attendance', {
+      student_id: 101, subject: 'Mathematics', attendance_date: '2026-08-21', status: 'unknown',
+    })).toThrow();
+  });
+
+  it('keeps only supported FAQ fields', () => {
+    expect(validatedPayload('faqs', {
+      question: 'Where is the library?', answer: 'Block A', category: 'campus', active: true,
+    })).toEqual({ question: 'Where is the library?', answer: 'Block A', category: 'campus' });
+  });
+
+  it('prepares a future notification for the scheduler', () => {
+    const payload = validatedPayload('notifications', {
+      title: 'Exam reminder', message: 'Check the exam schedule.', type: 'academic', audience: 'selected',
+      student_ids: ['101', 102], department: null, semester: null, scheduled_at: '2099-08-21T10:00:00.000Z', status: 'sent',
+    });
+    expect(payload).toMatchObject({ student_ids: [101, 102], status: 'scheduled' });
+  });
+
+  it('rejects a selected notification without student IDs', () => {
+    expect(() => validatedPayload('notifications', {
+      title: 'Selected notice', message: 'Important update', type: 'notice', audience: 'selected', student_ids: [],
+    })).toThrow();
+  });
   it('strips obsolete assignment fields', () => {
     const payload = validatedPayload('assignments', {
       title: 'Database exercise',

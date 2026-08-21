@@ -1,6 +1,6 @@
 export type ResourceName =
   | 'students' | 'timetables' | 'assignments' | 'exams' | 'attendance'
-  | 'faculty' | 'notices' | 'events' | 'emergency_contacts' | 'college_info';
+  | 'faculty' | 'notices' | 'events' | 'emergency_contacts' | 'college_info' | 'faqs';
 
 export interface Student {
   student_id: number;

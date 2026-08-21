@@ -28,6 +28,18 @@ services:
         sync: false
       - key: WHATSAPP_APP_SECRET
         sync: false
+      - key: WHATSAPP_TIMETABLE_TEMPLATE
+        sync: false
+      - key: WHATSAPP_TIMETABLE_UPDATE_TEMPLATE
+        sync: false
+      - key: WHATSAPP_ASSIGNMENT_TEMPLATE
+        sync: false
+      - key: WHATSAPP_EXAM_TEMPLATE
+        sync: false
+      - key: WHATSAPP_EVENT_TEMPLATE
+        sync: false
+      - key: WHATSAPP_NOTIFICATION_TEMPLATE
+        sync: false
       - key: JWT_SECRET
         generateValue: true
       - key: ADMIN_EMAIL

@@ -90,6 +90,12 @@ All secrets are backend-only. Do not prefix a secret with `VITE_`.
 | `WHATSAPP_VERIFY_TOKEN` | yes | Backend secret | Webhook verification |
 | `WHATSAPP_APP_SECRET` | yes | Backend secret | POST signature verification |
 | `WHATSAPP_API_VERSION` | yes | Backend | Meta Graph API version |
+| `WHATSAPP_TIMETABLE_TEMPLATE` | production reminders | Backend | Approved template; parameters: first name, date, schedule |
+| `WHATSAPP_TIMETABLE_UPDATE_TEMPLATE` | production updates | Backend | Approved template; parameters: day, start time, subject, room |
+| `WHATSAPP_ASSIGNMENT_TEMPLATE` | production reminders | Backend | Approved template; parameters: title, subject, due time |
+| `WHATSAPP_EXAM_TEMPLATE` | production reminders | Backend | Approved template; parameters: title, subject, date, start time |
+| `WHATSAPP_EVENT_TEMPLATE` | production reminders | Backend | Approved template; parameters: title, start time, venue |
+| `WHATSAPP_NOTIFICATION_TEMPLATE` | production broadcasts | Backend | Approved template; parameters: title, message |
 | `JWT_SECRET` | yes | Backend secret | Admin session signing |
 | `ADMIN_EMAIL` | yes | Backend secret | Administrator login |
 | `ADMIN_PASSWORD` | yes | Backend secret | Administrator login or bcrypt hash |
@@ -171,7 +177,12 @@ guarantee scheduled reminder execution; use an always-on instance or an
 external scheduled trigger for production reminders.
 
 Proactive WhatsApp messages outside Meta's customer-service window require
-approved templates and student opt-in.
+approved templates and student opt-in. In production, automatic timetable,
+assignment, exam, and event reminders are skipped when their corresponding
+template variable is empty. Scheduled notifications are checked every minute.
+The timetable job runs at 07:00 Monday-Saturday, assignment reminders at
+18:00, exam reminders at 08:05, and next-day event reminders at 08:10 in
+`COLLEGE_TIMEZONE`.
 
 ## Security
 

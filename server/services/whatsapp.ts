@@ -38,9 +38,49 @@ export async function sendText(to: string, text: string, notificationId?: string
   }
 }
 
-export async function sendTemplate(to: string, template: string, parameters: string[] = []) {
-  return send({
-    to: normalizePhone(to), type: 'template',
-    template: { name: template, language: { code: 'en' }, components: parameters.length ? [{ type: 'body', parameters: parameters.map((text) => ({ type: 'text', text })) }] : [] },
-  });
+export async function sendTemplate(to: string, template: string, parameters: string[] = [], notificationId?: string) {
+  const normalizedTo = normalizePhone(to);
+  try {
+    const result = await send({
+      to: normalizedTo, type: 'template',
+      template: { name: template, language: { code: 'en' }, components: parameters.length ? [{ type: 'body', parameters: parameters.map((text) => ({ type: 'text', text })) }] : [] },
+    });
+    recordDelivery({
+      phone: normalizedTo,
+      direction: 'outbound',
+      message: `[template:${template}] ${parameters.join(' | ')}`,
+      status: 'sent',
+      notification_id: notificationId,
+      provider_message_id: (result.messages as Array<{ id: string }> | undefined)?.[0]?.id,
+      metadata: { template, parameters },
+    });
+    return result;
+  } catch (error) {
+    recordDelivery({ phone: normalizedTo, direction: 'outbound', message: `[template:${template}]`, status: 'failed', error: error instanceof Error ? error.message : 'Unknown error', notification_id: notificationId });
+    throw error;
+  }
+}
+
+export async function recordMessageStatus(status: { id?: string; status?: string; timestamp?: string; errors?: unknown }) {
+  if (!status.id || !status.status) return;
+  const allowed = new Set(['sent', 'delivered', 'read', 'failed']);
+  if (!allowed.has(status.status)) return;
+
+  const { data: log, error } = await supabase
+    .from('message_logs')
+    .update({ status: status.status, error: status.errors ? JSON.stringify(status.errors) : null, updated_at: new Date().toISOString() })
+    .eq('provider_message_id', status.id)
+    .select('notification_id')
+    .maybeSingle();
+  if (error) {
+    logger.warn({ message: error.message, code: error.code, providerMessageId: status.id }, 'WhatsApp status update failed');
+    return;
+  }
+  if (!log?.notification_id) return;
+
+  const { count } = await supabase.from('message_logs')
+    .select('id', { count: 'exact', head: true })
+    .eq('notification_id', log.notification_id)
+    .in('status', ['delivered', 'read']);
+  await supabase.from('notifications').update({ delivered_count: count ?? 0, updated_at: new Date().toISOString() }).eq('id', log.notification_id);
 }

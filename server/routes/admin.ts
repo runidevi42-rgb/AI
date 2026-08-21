@@ -4,7 +4,7 @@ import { asyncHandler, AppError } from '../lib/errors.js';
 import { logger } from '../lib/logger.js';
 import { supabase } from '../lib/supabase.js';
 import { requireAdmin } from '../middleware/auth.js';
-import { dispatchNotification } from '../services/notifications.js';
+import { dispatchNotification, notifyTimetableChange } from '../services/notifications.js';
 import { validatedPayload } from './admin-validation.js';
 
 export const adminRouter = Router();
@@ -47,7 +47,7 @@ adminRouter.get('/:resource', asyncHandler(async (req, res) => {
   const normalizedSearch = search?.trim().replace(/[%(),]/g, '') ?? '';
 
   if (normalizedSearch) {
-    const fields: Record<string, string[]> = { students: ['student_id','full_name','whatsapp_number','department','course'], faculty: ['full_name','department'], notices: ['title','content'], assignments: ['title','subject','department'], exams: ['title','subject','department'], events: ['title','venue'], emergency_contacts: ['contact_name','phone_number','role_or_service','emergency_type'] };
+    const fields: Record<string, string[]> = { students: ['student_id','full_name','whatsapp_number','department','course'], timetables: ['subject','department','section','day_of_week','room'], attendance: ['subject','status'], faculty: ['full_name','department'], notices: ['title','content'], assignments: ['title','subject','department'], exams: ['title','subject','department'], events: ['title','venue'], emergency_contacts: ['contact_name','phone_number','role_or_service','emergency_type'], college_info: ['title','content','category'], faqs: ['question','answer','category'] };
     const list = fields[table];
     if (list) query = query.or(list.map((field) => `${field}.ilike.%${normalizedSearch}%`).join(','));
   }
@@ -163,6 +163,8 @@ adminRouter.post('/:resource', asyncHandler(async (req, res) => {
     });
   }
 
+  if (table === 'timetables') void notifyTimetableChange(data).catch((err) => logger.error({ err }, 'Timetable update notification failed'));
+
   return res.status(201).json(data);
 }));
 
@@ -176,6 +178,7 @@ adminRouter.put('/:resource/:id', asyncHandler(async (req, res) => {
   const payload = table === 'students' ? changes : { ...changes, updated_at: new Date().toISOString() };
   const { data, error } = await supabase.from(table).update(payload).eq(primaryKey, req.params.id).select().single();
   if (error) throw new AppError(400, error.message);
+  if (table === 'timetables') void notifyTimetableChange(data).catch((err) => logger.error({ err }, 'Timetable update notification failed'));
   res.json(data);
 }));
 
