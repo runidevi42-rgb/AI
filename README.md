@@ -95,7 +95,11 @@ All secrets are backend-only. Do not prefix a secret with `VITE_`.
 | `WHATSAPP_ASSIGNMENT_TEMPLATE` | production reminders | Backend | Approved template; parameters: title, subject, due time |
 | `WHATSAPP_EXAM_TEMPLATE` | production reminders | Backend | Approved template; parameters: title, subject, date, start time |
 | `WHATSAPP_EVENT_TEMPLATE` | production reminders | Backend | Approved template; parameters: title, start time, venue |
-| `WHATSAPP_NOTIFICATION_TEMPLATE` | production broadcasts | Backend | Approved template; parameters: title, message |
+| `WHATSAPP_NOTIFICATION_TEMPLATE` | production broadcasts | Backend | Approved template; parameters: first name, title, message |
+| `WHATSAPP_TEMPLATE_LANGUAGE` | yes | Backend | Exact Meta language code; defaults to `en`, for example `en_US` |
+| `WEB_PUSH_VAPID_PUBLIC_KEY` | Web Push | Backend/public value | VAPID public key used by browser subscriptions |
+| `WEB_PUSH_VAPID_PRIVATE_KEY` | Web Push | Backend secret | VAPID private key; never expose to the browser |
+| `WEB_PUSH_VAPID_SUBJECT` | Web Push | Backend | Contact URI, normally `mailto:admin@college.edu` |
 | `JWT_SECRET` | yes | Backend secret | Admin session signing |
 | `ADMIN_EMAIL` | yes | Backend secret | Administrator login |
 | `ADMIN_PASSWORD` | yes | Backend secret | Administrator login or bcrypt hash |
@@ -183,6 +187,56 @@ template variable is empty. Scheduled notifications are checked every minute.
 The timetable job runs at 07:00 Monday-Saturday, assignment reminders at
 18:00, exam reminders at 08:05, and next-day event reminders at 08:10 in
 `COLLEGE_TIMEZONE`.
+
+## Approved WhatsApp utility templates
+
+Create and obtain Meta approval for six utility templates, then place their
+exact lowercase Meta names in the matching environment variables. The body
+parameters must remain in this exact order:
+
+| Environment variable | Body parameters |
+| --- | --- |
+| `WHATSAPP_TIMETABLE_TEMPLATE` | `{{1}}` first name, `{{2}}` timetable date, `{{3}}` formatted schedule |
+| `WHATSAPP_TIMETABLE_UPDATE_TEMPLATE` | `{{1}}` day/date, `{{2}}` start time, `{{3}}` subject, `{{4}}` room |
+| `WHATSAPP_ASSIGNMENT_TEMPLATE` | `{{1}}` title, `{{2}}` subject, `{{3}}` due date/time |
+| `WHATSAPP_EXAM_TEMPLATE` | `{{1}}` examination title, `{{2}}` subject, `{{3}}` examination date, `{{4}}` start time |
+| `WHATSAPP_EVENT_TEMPLATE` | `{{1}}` event title, `{{2}}` start date/time, `{{3}}` venue |
+| `WHATSAPP_NOTIFICATION_TEMPLATE` | `{{1}}` student first name, `{{2}}` notification title, `{{3}}` notification message |
+
+Set `WHATSAPP_TEMPLATE_LANGUAGE=en` unless the approved template uses another
+exact Meta language code such as `en_US`. Missing template configuration is a
+clear `503` configuration error; proactive jobs never fall back to ordinary
+text messages. Conversational chatbot replies still use ordinary text inside
+Meta's customer-service window. Proactive WhatsApp templates may be chargeable
+under Meta's current pricing.
+
+## Web Push and consent migration
+
+Run [migrate_20260822_whatsapp_templates_web_push.sql](supabase/migrate_20260822_whatsapp_templates_web_push.sql)
+manually in the Supabase SQL Editor before deploying this version. It adds:
+
+- `active`, `whatsapp_opt_in`, and `web_push_opt_in` student flags
+- `delivery_channel` with `web_push`, `whatsapp`, and `both`
+- template, language, channel, and failure fields on delivery logs
+- the protected `web_push_subscriptions` table and notification indexes
+
+The migration preserves existing data and defaults consent flags to `false`.
+Record explicit consent before enabling either channel. Generate one VAPID key
+pair with `npx web-push generate-vapid-keys`, store the private key only on the
+backend, and serve `/web-push-sw.js` when registering a browser subscription.
+Authenticated admins can register a student's browser subscription through
+`POST /api/admin/students/:studentId/web-push-subscriptions` and disable one
+through `DELETE /api/admin/web-push-subscriptions/:id`.
+
+To test safely, create or choose one test student, set only that student's
+relevant opt-in flag to `true`, register their test browser subscription, and
+send a notification with audience `selected` containing only that student ID.
+For WhatsApp, use a Meta-approved test recipient and the approved notification
+template. Confirm the log moves from `sent` to `delivered` or `read` after the
+Meta status webhook arrives.
+
+Never upload `.env`. Put secrets in Render's Environment settings and keep only
+empty placeholders in `.env.example`.
 
 ## Security
 

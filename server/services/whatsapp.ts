@@ -1,17 +1,19 @@
 import { config } from '../config.js';
 import { logger } from '../lib/logger.js';
 import { supabase } from '../lib/supabase.js';
+import { resolveTemplate, type WhatsAppTemplateKind } from './templates.js';
 
 const endpoint = `https://graph.facebook.com/${config.WHATSAPP_API_VERSION}/${config.WHATSAPP_PHONE_NUMBER_ID}/messages`;
+
+export type DeliveryContext = { notificationId?: string; studentId?: number };
 
 export function normalizePhone(value: string) {
   return String(value).replace(/\D/g, '').replace(/^00/, '');
 }
 
-function recordDelivery(payload: Record<string, unknown>) {
-  void supabase.from('message_logs').insert(payload).then(({ error }) => {
-    if (error) logger.warn({ message: error.message, code: error.code }, 'WhatsApp delivery log failed');
-  });
+async function recordDelivery(payload: Record<string, unknown>) {
+  const { error } = await supabase.from('message_logs').insert(payload);
+  if (error) logger.warn({ message: error.message, code: error.code }, 'WhatsApp delivery log failed');
 }
 
 async function send(payload: Record<string, unknown>) {
@@ -25,51 +27,73 @@ async function send(payload: Record<string, unknown>) {
   return body;
 }
 
-export async function sendText(to: string, text: string, notificationId?: string) {
+export async function sendText(to: string, text: string, context: DeliveryContext = {}) {
+  const normalizedTo = normalizePhone(to);
   try {
-    const normalizedTo = normalizePhone(to);
     const result = await send({ to: normalizedTo, type: 'text', text: { preview_url: false, body: text.slice(0, 4096) } });
-    recordDelivery({ phone: normalizedTo, direction: 'outbound', message: text, status: 'sent', notification_id: notificationId, provider_message_id: (result.messages as Array<{ id: string }> | undefined)?.[0]?.id });
+    await recordDelivery({
+      phone: normalizedTo, student_id: context.studentId, direction: 'outbound', channel: 'whatsapp',
+      message: text, status: 'sent', notification_id: context.notificationId,
+      provider_message_id: (result.messages as Array<{ id: string }> | undefined)?.[0]?.id,
+    });
     return result;
   } catch (error) {
-    logger.error({ err: error }, 'WhatsApp delivery failed');
-    recordDelivery({ phone: normalizePhone(to), direction: 'outbound', message: text, status: 'failed', error: error instanceof Error ? error.message : 'Unknown error', notification_id: notificationId });
+    const failureReason = error instanceof Error ? error.message : 'Unknown error';
+    logger.error({ err: error, recipientSuffix: normalizedTo.slice(-4) }, 'WhatsApp delivery failed');
+    await recordDelivery({
+      phone: normalizedTo, student_id: context.studentId, direction: 'outbound', channel: 'whatsapp',
+      message: text, status: 'failed', failure_reason: failureReason, error: failureReason,
+      notification_id: context.notificationId,
+    });
     throw error;
   }
 }
 
-export async function sendTemplate(to: string, template: string, parameters: string[] = [], notificationId?: string) {
+export async function sendTemplate(to: string, kind: WhatsAppTemplateKind, parameters: string[], context: DeliveryContext = {}) {
+  const template = resolveTemplate(kind, parameters);
   const normalizedTo = normalizePhone(to);
   try {
     const result = await send({
-      to: normalizedTo, type: 'template',
-      template: { name: template, language: { code: 'en' }, components: parameters.length ? [{ type: 'body', parameters: parameters.map((text) => ({ type: 'text', text })) }] : [] },
+      to: normalizedTo,
+      type: 'template',
+      template: {
+        name: template.name,
+        language: { code: template.language },
+        components: [{ type: 'body', parameters: template.parameters.map((text) => ({ type: 'text', text })) }],
+      },
     });
-    recordDelivery({
-      phone: normalizedTo,
-      direction: 'outbound',
-      message: `[template:${template}] ${parameters.join(' | ')}`,
-      status: 'sent',
-      notification_id: notificationId,
+    await recordDelivery({
+      phone: normalizedTo, student_id: context.studentId, direction: 'outbound', channel: 'whatsapp',
+      message: `[template:${template.name}]`, status: 'sent', notification_id: context.notificationId,
       provider_message_id: (result.messages as Array<{ id: string }> | undefined)?.[0]?.id,
-      metadata: { template, parameters },
+      template_name: template.name, template_language: template.language,
+      metadata: { templateKind: kind, parameters: template.parameters },
     });
     return result;
   } catch (error) {
-    recordDelivery({ phone: normalizedTo, direction: 'outbound', message: `[template:${template}]`, status: 'failed', error: error instanceof Error ? error.message : 'Unknown error', notification_id: notificationId });
+    const failureReason = error instanceof Error ? error.message : 'Unknown error';
+    await recordDelivery({
+      phone: normalizedTo, student_id: context.studentId, direction: 'outbound', channel: 'whatsapp',
+      message: `[template:${template.name}]`, status: 'failed', notification_id: context.notificationId,
+      template_name: template.name, template_language: template.language,
+      failure_reason: failureReason, error: failureReason,
+      metadata: { templateKind: kind, parameters: template.parameters },
+    });
     throw error;
   }
 }
 
-export async function recordMessageStatus(status: { id?: string; status?: string; timestamp?: string; errors?: unknown }) {
+export async function recordMessageStatus(status: { id?: string; status?: string; timestamp?: string; errors?: unknown }, database: Pick<typeof supabase, 'from'> = supabase) {
   if (!status.id || !status.status) return;
   const allowed = new Set(['sent', 'delivered', 'read', 'failed']);
   if (!allowed.has(status.status)) return;
+  const failureReason = status.errors ? JSON.stringify(status.errors) : null;
 
-  const { data: log, error } = await supabase
+  const { data: log, error } = await database
     .from('message_logs')
-    .update({ status: status.status, error: status.errors ? JSON.stringify(status.errors) : null, updated_at: new Date().toISOString() })
+    .update({ status: status.status, failure_reason: failureReason, error: failureReason, updated_at: new Date().toISOString() })
     .eq('provider_message_id', status.id)
+    .eq('channel', 'whatsapp')
     .select('notification_id')
     .maybeSingle();
   if (error) {
@@ -78,9 +102,9 @@ export async function recordMessageStatus(status: { id?: string; status?: string
   }
   if (!log?.notification_id) return;
 
-  const { count } = await supabase.from('message_logs')
+  const { count } = await database.from('message_logs')
     .select('id', { count: 'exact', head: true })
     .eq('notification_id', log.notification_id)
     .in('status', ['delivered', 'read']);
-  await supabase.from('notifications').update({ delivered_count: count ?? 0, updated_at: new Date().toISOString() }).eq('id', log.notification_id);
+  await database.from('notifications').update({ delivered_count: count ?? 0, updated_at: new Date().toISOString() }).eq('id', log.notification_id);
 }

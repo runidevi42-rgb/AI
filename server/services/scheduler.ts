@@ -1,11 +1,14 @@
 import cron from 'node-cron';
 import { config } from '../config.js';
+import { settleInBatches } from '../lib/batch.js';
 import { logger } from '../lib/logger.js';
 import { supabase } from '../lib/supabase.js';
 import { dispatchNotification } from './notifications.js';
-import { sendTemplate, sendText } from './whatsapp.js';
+import { resolveTemplate, type WhatsAppTemplateKind } from './templates.js';
+import { sendTemplate } from './whatsapp.js';
 
 type DateParts = { date: string; day: string };
+type ReminderStudent = { student_id: number; full_name?: string; whatsapp_number: string };
 
 export function collegeDateParts(value = new Date()): DateParts {
   const dateParts = new Intl.DateTimeFormat('en-CA', {
@@ -22,50 +25,75 @@ export function addCalendarDays(date: string, days: number) {
   return new Date(Date.UTC(year, month - 1, day + days)).toISOString().slice(0, 10);
 }
 
-async function once(key: string, task: () => Promise<void>) {
-  const { data, error } = await supabase.from('scheduled_job_runs').select('id').eq('job_key', key).maybeSingle();
-  if (error) throw error;
-  if (data) return;
-  await task();
-  const { error: insertError } = await supabase.from('scheduled_job_runs').insert({ job_key: key, completed_at: new Date().toISOString() });
-  if (insertError && insertError.code !== '23505') throw insertError;
+function dateBounds(date: string) {
+  return {
+    start: new Date(`${date}T00:00:00+05:30`).toISOString(),
+    end: new Date(`${date}T23:59:59.999+05:30`).toISOString(),
+  };
 }
 
-async function sendReminder(to: string, template: string, parameters: string[], message: string) {
-  if (template) return sendTemplate(to, template, parameters);
-  if (config.NODE_ENV === 'production') {
-    logger.warn({ recipientSuffix: to.slice(-4) }, 'Reminder skipped because its approved WhatsApp template is not configured');
-    return;
+function displayDate(date: string) {
+  return new Date(`${date}T12:00:00+05:30`).toLocaleDateString('en-IN', { timeZone: config.COLLEGE_TIMEZONE, dateStyle: 'medium' });
+}
+
+function displayDateTime(value: string) {
+  return new Date(value).toLocaleString('en-IN', { timeZone: config.COLLEGE_TIMEZONE, dateStyle: 'medium', timeStyle: 'short' });
+}
+
+export async function runClaimedOnce(task: () => Promise<void>, claim: () => Promise<boolean>, release: () => Promise<void>) {
+  if (!await claim()) return false;
+  try {
+    await task();
+    return true;
+  } catch (failure) {
+    await release();
+    throw failure;
   }
-  return sendText(to, message);
+}
+
+export async function runScheduledOnce(key: string, task: () => Promise<void>) {
+  return runClaimedOnce(task, async () => {
+    const { error } = await supabase.from('scheduled_job_runs').insert({ job_key: key, completed_at: new Date().toISOString() });
+    if (error?.code === '23505') return false;
+    if (error) throw error;
+    return true;
+  }, async () => {
+    await supabase.from('scheduled_job_runs').delete().eq('job_key', key);
+  });
+}
+
+async function sendReminderBatch(students: ReminderStudent[], kind: WhatsAppTemplateKind, parameters: (student: ReminderStudent) => string[]) {
+  if (students.length) resolveTemplate(kind, parameters(students[0]));
+  const results = await settleInBatches(students, 10, (student) => sendTemplate(student.whatsapp_number, kind, parameters(student), { studentId: student.student_id }));
+  const failures = results.filter((result) => result.status === 'rejected').length;
+  if (failures) logger.warn({ kind, failures, total: results.length }, 'Some scheduled WhatsApp messages failed');
 }
 
 async function dailySchedules() {
   const { date, day } = collegeDateParts();
-  await once(`daily-schedule:${date}`, async () => {
-    const { data: students, error } = await supabase.from('students').select('full_name,whatsapp_number,department,semester');
+  await runScheduledOnce(`daily-schedule:${date}`, async () => {
+    const { data: students, error } = await supabase.from('students').select('student_id,full_name,whatsapp_number,department,semester').match({ active: true, whatsapp_opt_in: true });
     if (error) throw error;
     for (const student of students ?? []) {
       const { data: classes, error: classError } = await supabase.from('timetables').select('start_time,end_time,subject,room').match({ department: student.department, semester: student.semester }).ilike('day_of_week', day).order('start_time');
       if (classError) throw classError;
       if (!classes?.length) continue;
-      const lines = classes.map((item) => `${item.start_time.slice(0, 5)} - ${item.subject}${item.room ? ` (${item.room})` : ''}`).join('\n');
-      const firstName = student.full_name.split(' ')[0];
-      await sendReminder(student.whatsapp_number, config.WHATSAPP_TIMETABLE_TEMPLATE, [firstName, date, lines], `Good morning, ${firstName}. Today's classes:\n${lines}`);
+      const schedule = classes.map((item) => `${item.start_time.slice(0, 5)} - ${item.subject}${item.room ? ` (${item.room})` : ' (To be announced)'}`).join('\n');
+      await sendReminderBatch([student], 'timetable', (recipient) => [recipient.full_name?.split(' ')[0] ?? 'Student', displayDate(date), schedule]);
     }
   });
 }
 
 async function assignmentReminders() {
   const tomorrow = addCalendarDays(collegeDateParts().date, 1);
-  await once(`assignments:${tomorrow}`, async () => {
-    const { data: assignments, error } = await supabase.from('assignments').select('title,subject,department,semester,due_at').gte('due_at', `${tomorrow}T00:00:00`).lte('due_at', `${tomorrow}T23:59:59.999`);
+  const bounds = dateBounds(tomorrow);
+  await runScheduledOnce(`assignments:${tomorrow}`, async () => {
+    const { data: assignments, error } = await supabase.from('assignments').select('title,subject,department,semester,due_at').gte('due_at', bounds.start).lte('due_at', bounds.end);
     if (error) throw error;
     for (const assignment of assignments ?? []) {
-      const { data: students, error: studentError } = await supabase.from('students').select('whatsapp_number').match({ department: assignment.department, semester: assignment.semester });
+      const { data: students, error: studentError } = await supabase.from('students').select('student_id,whatsapp_number').match({ department: assignment.department, semester: assignment.semester, active: true, whatsapp_opt_in: true });
       if (studentError) throw studentError;
-      const due = new Date(assignment.due_at).toLocaleString('en-IN', { timeZone: config.COLLEGE_TIMEZONE, dateStyle: 'medium', timeStyle: 'short' });
-      await Promise.allSettled((students ?? []).map((student) => sendReminder(student.whatsapp_number, config.WHATSAPP_ASSIGNMENT_TEMPLATE, [assignment.title, assignment.subject, due], `Reminder: ${assignment.title} (${assignment.subject}) is due ${due}.`)));
+      await sendReminderBatch(students ?? [], 'assignment', () => [assignment.title, assignment.subject, displayDateTime(assignment.due_at)]);
     }
   });
 }
@@ -74,13 +102,13 @@ async function examReminders() {
   const today = collegeDateParts().date;
   for (const daysAhead of [3, 1]) {
     const examDate = addCalendarDays(today, daysAhead);
-    await once(`exams:${daysAhead}:${examDate}`, async () => {
+    await runScheduledOnce(`exams:${daysAhead}:${examDate}`, async () => {
       const { data: exams, error } = await supabase.from('exams').select('title,subject,department,semester,exam_date,start_time').eq('exam_date', examDate);
       if (error) throw error;
       for (const exam of exams ?? []) {
-        const { data: students, error: studentError } = await supabase.from('students').select('whatsapp_number').match({ department: exam.department, semester: exam.semester });
+        const { data: students, error: studentError } = await supabase.from('students').select('student_id,whatsapp_number').match({ department: exam.department, semester: exam.semester, active: true, whatsapp_opt_in: true });
         if (studentError) throw studentError;
-        await Promise.allSettled((students ?? []).map((student) => sendReminder(student.whatsapp_number, config.WHATSAPP_EXAM_TEMPLATE, [exam.title, exam.subject, exam.exam_date, exam.start_time.slice(0, 5)], `Exam reminder: ${exam.title} (${exam.subject}) is on ${exam.exam_date} at ${exam.start_time.slice(0, 5)}.`)));
+        await sendReminderBatch(students ?? [], 'exam', () => [exam.title, exam.subject, displayDate(exam.exam_date), exam.start_time.slice(0, 5)]);
       }
     });
   }
@@ -88,16 +116,16 @@ async function examReminders() {
 
 async function eventReminders() {
   const tomorrow = addCalendarDays(collegeDateParts().date, 1);
-  await once(`events:${tomorrow}`, async () => {
-    const { data: events, error } = await supabase.from('events').select('title,start_at,venue,department').gte('start_at', `${tomorrow}T00:00:00`).lte('start_at', `${tomorrow}T23:59:59.999`);
+  const bounds = dateBounds(tomorrow);
+  await runScheduledOnce(`events:${tomorrow}`, async () => {
+    const { data: events, error } = await supabase.from('events').select('title,start_at,venue,department').gte('start_at', bounds.start).lte('start_at', bounds.end);
     if (error) throw error;
     for (const event of events ?? []) {
-      let query = supabase.from('students').select('whatsapp_number');
+      let query = supabase.from('students').select('student_id,whatsapp_number').match({ active: true, whatsapp_opt_in: true });
       if (event.department) query = query.eq('department', event.department);
       const { data: students, error: studentError } = await query;
       if (studentError) throw studentError;
-      const start = new Date(event.start_at).toLocaleString('en-IN', { timeZone: config.COLLEGE_TIMEZONE, dateStyle: 'medium', timeStyle: 'short' });
-      await Promise.allSettled((students ?? []).map((student) => sendReminder(student.whatsapp_number, config.WHATSAPP_EVENT_TEMPLATE, [event.title, start, event.venue ?? 'See college notice'], `Reminder: ${event.title} is scheduled for ${start}${event.venue ? ` at ${event.venue}` : ''}.`)));
+      await sendReminderBatch(students ?? [], 'event', () => [event.title, displayDateTime(event.start_at), event.venue ?? 'To be announced']);
     }
   });
 }
@@ -105,7 +133,7 @@ async function eventReminders() {
 async function scheduledNotifications() {
   const { data, error } = await supabase.from('notifications').select('id').eq('status', 'scheduled').lte('scheduled_at', new Date().toISOString()).limit(20);
   if (error) throw error;
-  await Promise.allSettled((data ?? []).map((item) => dispatchNotification(item.id)));
+  await settleInBatches(data ?? [], 3, (item) => runScheduledOnce(`notification:${item.id}`, async () => { await dispatchNotification(item.id); }).then(() => undefined));
 }
 
 function guarded(name: string, job: () => Promise<void>) {

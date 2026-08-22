@@ -44,6 +44,7 @@ const notificationSchema = z.object({
   message: z.string().trim().min(1).max(3500),
   type: z.enum(['notice', 'academic', 'emergency', 'event', 'reminder']).default('notice'),
   audience: z.enum(['all', 'selected', 'segment']).default('all'),
+  delivery_channel: z.enum(['web_push', 'whatsapp', 'both']).default('web_push'),
   student_ids: z.array(z.coerce.number().int().positive()).default([]),
   department: z.string().trim().nullable().optional(),
   semester: z.coerce.number().int().min(1).max(12).nullable().optional(),

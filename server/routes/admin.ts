@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { z } from 'zod';
+import { config } from '../config.js';
 import { asyncHandler, AppError } from '../lib/errors.js';
 import { logger } from '../lib/logger.js';
 import { supabase } from '../lib/supabase.js';
@@ -9,6 +10,39 @@ import { validatedPayload } from './admin-validation.js';
 
 export const adminRouter = Router();
 adminRouter.use(requireAdmin);
+
+const pushSubscriptionSchema = z.object({
+  endpoint: z.string().url(),
+  keys: z.object({ p256dh: z.string().min(20), auth: z.string().min(8) }),
+});
+
+adminRouter.get('/messaging/config', (_req, res) => res.json({
+  webPushPublicKey: config.WEB_PUSH_VAPID_PUBLIC_KEY || null,
+  whatsappTemplateLanguage: config.WHATSAPP_TEMPLATE_LANGUAGE,
+  notificationTemplateConfigured: Boolean(config.WHATSAPP_NOTIFICATION_TEMPLATE),
+}));
+
+adminRouter.post('/students/:studentId/web-push-subscriptions', asyncHandler(async (req, res) => {
+  const studentId = z.coerce.number().int().positive().parse(req.params.studentId);
+  const subscription = pushSubscriptionSchema.parse(req.body);
+  const { data, error } = await supabase.from('web_push_subscriptions').upsert({
+    student_id: studentId,
+    endpoint: subscription.endpoint,
+    p256dh: subscription.keys.p256dh,
+    auth: subscription.keys.auth,
+    active: true,
+    updated_at: new Date().toISOString(),
+  }, { onConflict: 'endpoint' }).select('id,student_id,active,created_at,updated_at').single();
+  if (error) throw new AppError(400, error.message);
+  res.status(201).json(data);
+}));
+
+adminRouter.delete('/web-push-subscriptions/:id', asyncHandler(async (req, res) => {
+  const id = z.string().uuid().parse(req.params.id);
+  const { error } = await supabase.from('web_push_subscriptions').update({ active: false, updated_at: new Date().toISOString() }).eq('id', id);
+  if (error) throw new AppError(400, error.message);
+  res.sendStatus(204);
+}));
 
 const resources = new Set(['students','timetables','assignments','exams','attendance','faculty','notices','events','emergency_contacts','college_info','faqs','notifications']);
 const resource = (value: string) => {
@@ -36,7 +70,7 @@ adminRouter.get('/:resource', asyncHandler(async (req, res) => {
   const { page, pageSize, search } = z.object({ page: z.coerce.number().min(1).default(1), pageSize: z.coerce.number().min(1).max(100).default(20), search: z.string().optional() }).parse(req.query);
   const isStudents = table === 'students';
   const selectedColumns: Record<string, string> = {
-    students: 'student_id,full_name,whatsapp_number,roll_number,department,course,semester',
+    students: 'student_id,full_name,whatsapp_number,roll_number,department,course,semester,active,whatsapp_opt_in,web_push_opt_in',
     assignments: 'id,title,subject,description,department,semester,due_at,created_at,updated_at',
     exams: 'id,title,subject,department,semester,exam_date,start_time,end_time,instructions,created_at,updated_at',
     college_info: 'id,title,content,category,created_at,updated_at',
@@ -94,6 +128,9 @@ adminRouter.post('/:resource', asyncHandler(async (req, res) => {
       department,
       course,
       semester,
+      active,
+      whatsapp_opt_in,
+      web_push_opt_in,
     } = req.body;
 
     if (
@@ -131,6 +168,9 @@ adminRouter.post('/:resource', asyncHandler(async (req, res) => {
       department: String(department).trim(),
       course: String(course).trim(),
       semester: normalizedSemester,
+      active: active === undefined ? true : Boolean(active),
+      whatsapp_opt_in: Boolean(whatsapp_opt_in),
+      web_push_opt_in: Boolean(web_push_opt_in),
     };
 
     if (

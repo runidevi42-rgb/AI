@@ -22,6 +22,9 @@ create table if not exists public.students (
 -- constraint. A non-partial unique index is valid as a foreign-key target.
 create unique index if not exists students_student_id_unique_idx
   on public.students(student_id);
+alter table public.students add column if not exists active boolean not null default true;
+alter table public.students add column if not exists whatsapp_opt_in boolean not null default false;
+alter table public.students add column if not exists web_push_opt_in boolean not null default false;
 
 -- Complete the existing minimal academic tables.
 create table if not exists public.timetables (

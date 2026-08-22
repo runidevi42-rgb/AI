@@ -10,6 +10,9 @@ export interface Student {
   department: string;
   course: string;
   semester: number;
+  active: boolean;
+  whatsapp_opt_in: boolean;
+  web_push_opt_in: boolean;
 }
 
 export interface Assignment {

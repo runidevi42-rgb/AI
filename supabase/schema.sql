@@ -5,7 +5,8 @@ create table if not exists students (
   whatsapp_number text unique not null check (whatsapp_number ~ '^[0-9]{8,15}$'),
   roll_number int unique not null, department text not null, course text not null, semester int not null check (semester between 1 and 12),
   section text not null default 'A', email text, guardian_phone text, active boolean not null default true,
-  whatsapp_opt_in boolean not null default true, created_at timestamptz not null default now(), updated_at timestamptz not null default now()
+  whatsapp_opt_in boolean not null default false, web_push_opt_in boolean not null default false,
+  created_at timestamptz not null default now(), updated_at timestamptz not null default now()
 );
 create index if not exists students_scope_idx on students(department, semester, section);
 

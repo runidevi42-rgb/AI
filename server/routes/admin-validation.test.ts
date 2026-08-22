@@ -33,6 +33,12 @@ describe('admin resource validation', () => {
       title: 'Selected notice', message: 'Important update', type: 'notice', audience: 'selected', student_ids: [],
     })).toThrow();
   });
+
+  it('uses free Web Push as the default notification channel', () => {
+    expect(validatedPayload('notifications', {
+      title: 'General notice', message: 'Library hours changed.', type: 'notice', audience: 'all', student_ids: [],
+    })).toMatchObject({ delivery_channel: 'web_push', status: 'draft' });
+  });
   it('strips obsolete assignment fields', () => {
     const payload = validatedPayload('assignments', {
       title: 'Database exercise',
