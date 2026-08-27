@@ -4,9 +4,10 @@ import { config } from '../config.js';
 import { asyncHandler } from '../lib/errors.js';
 import { logger } from '../lib/logger.js';
 import { answerStudent } from '../services/assistant.js';
-import { normalizePhone, recordMessageStatus, sendText } from '../services/whatsapp.js';
+import { hasProcessedMessage, normalizePhone, recordMessageStatus, sendText } from '../services/whatsapp.js';
 
 export const webhookRouter = Router();
+const inFlightMessageIds = new Set<string>();
 
 webhookRouter.use((req, res, next) => {
   if (req.method !== 'POST') return next();
@@ -40,22 +41,30 @@ webhookRouter.post('/', asyncHandler(async (req, res) => {
     return;
   }
 
-  await Promise.allSettled(messages.map(async (item: { id?: string; from?: string; type?: string; text?: { body?: string } }) => {
+  await Promise.allSettled(messages.map(async (item: { id?: string; from?: string; type?: string; timestamp?: string; text?: { body?: string } }) => {
     if (item.type !== 'text' || !item.from || typeof item.text?.body !== 'string') {
       logger.debug({ messageId: item.id, messageType: item.type }, 'Ignored non-text WhatsApp message');
       return;
     }
 
+    if (!item.id) return;
+    if (inFlightMessageIds.has(item.id)) return;
+    if (await hasProcessedMessage(item.id)) {
+      logger.debug({ messageId: item.id }, 'Ignored duplicate WhatsApp message');
+      return;
+    }
+    inFlightMessageIds.add(item.id);
     const senderNumber = normalizePhone(item.from);
-    console.log('Incoming WhatsApp phone:', senderNumber);
-    logger.info({ senderNumber, messageId: item.id }, 'Incoming WhatsApp text message');
+    logger.info({ senderSuffix: senderNumber.slice(-4), messageId: item.id, timestamp: item.timestamp }, 'Incoming WhatsApp text message');
 
     try {
-      const reply = await answerStudent(senderNumber, item.text.body);
-      await sendText(senderNumber, reply.text);
+      const reply = await answerStudent(senderNumber, item.text.body, item.id);
+      await sendText(senderNumber, reply.text, { studentId: reply.studentId });
     } catch (error) {
       logger.error({ err: error, messageId: item.id }, 'Could not process incoming message');
-      await sendText(senderNumber, 'I am having trouble accessing college information right now. Please try again shortly.');
+      await sendText(senderNumber, 'I am temporarily unable to process this question. Please try again.');
+    } finally {
+      inFlightMessageIds.delete(item.id);
     }
   }));
 }));

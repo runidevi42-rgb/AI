@@ -2,13 +2,24 @@ import { config } from '../config.js';
 import { logger } from '../lib/logger.js';
 import { supabase } from '../lib/supabase.js';
 import { resolveTemplate, type WhatsAppTemplateKind } from './templates.js';
+import { normalizePhoneNumber } from '../utils/phone.js';
 
 const endpoint = `https://graph.facebook.com/${config.WHATSAPP_API_VERSION}/${config.WHATSAPP_PHONE_NUMBER_ID}/messages`;
 
 export type DeliveryContext = { notificationId?: string; studentId?: number };
 
 export function normalizePhone(value: string) {
-  return String(value).replace(/\D/g, '').replace(/^00/, '');
+  return normalizePhoneNumber(value);
+}
+
+export async function hasProcessedMessage(messageId: string, database: Pick<typeof supabase, 'from'> = supabase) {
+  if (!messageId) return false;
+  const { data, error } = await database.from('message_logs').select('id').eq('provider_message_id', messageId).eq('channel', 'whatsapp').limit(1);
+  if (error) {
+    logger.warn({ message: error.message, code: error.code }, 'WhatsApp duplicate check failed');
+    throw error;
+  }
+  return Boolean(data?.length);
 }
 
 async function recordDelivery(payload: Record<string, unknown>) {
@@ -21,9 +32,10 @@ async function send(payload: Record<string, unknown>) {
     method: 'POST',
     headers: { Authorization: `Bearer ${config.WHATSAPP_ACCESS_TOKEN}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({ messaging_product: 'whatsapp', ...payload }),
+    signal: AbortSignal.timeout(10_000),
   });
   const body = await response.json() as Record<string, unknown>;
-  if (!response.ok) throw new Error(`WhatsApp API error (${response.status}): ${JSON.stringify(body)}`);
+  if (!response.ok) throw new Error(`WhatsApp API error (${response.status})`);
   return body;
 }
 
