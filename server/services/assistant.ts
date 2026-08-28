@@ -10,25 +10,46 @@ const groq = new Groq({ apiKey: config.GROQ_API_KEY });
 const AI_FAILURE_REPLY = 'I am temporarily unable to process this question. Please try again.';
 const DB_FAILURE_REPLY = 'The college database is temporarily unavailable. Please try again later.';
 
-function logConversation(phone: string, studentId: number | undefined, incoming: string, response: string, intent: ChatbotIntent, messageId?: string) {
+function logConversation(phone: string, studentId: number | undefined, incoming: string, response: string, intent: ChatbotIntent, messageId?: string, channel = 'whatsapp') {
   void supabase.from('message_logs').insert([
-    { phone, student_id: studentId, direction: 'inbound', message: incoming, status: 'received', provider_message_id: messageId, channel: 'whatsapp', metadata: { intent } },
-    { phone, student_id: studentId, direction: 'outbound', message: response, status: 'generated', channel: 'whatsapp', metadata: { intent } },
+    { phone, student_id: studentId, direction: 'inbound', message: incoming, status: 'received', provider_message_id: channel === 'whatsapp' ? messageId : undefined, channel: 'whatsapp', metadata: { intent, channel, session_id: messageId } },
+    { phone, student_id: studentId, direction: 'outbound', message: response, status: 'generated', channel: 'whatsapp', metadata: { intent, channel, session_id: messageId } },
   ]).then(({ error }) => { if (error) logger.warn({ message: error.message, code: error.code }, 'Conversation audit log failed'); });
 }
 
-async function answerWithAI(message: string, student: StudentProfile) {
+async function answerWithAI(message: string, student: StudentProfile, sessionId?: string) {
   try {
-    const completion = await groq.chat.completions.create({
-      model: config.GROQ_MODEL, temperature: 0.1, max_tokens: 300,
-      messages: [
-        { role: 'system', content: 'You are a concise, friendly college study assistant. Answer greetings and study/general questions only. Never invent official college data, student details, attendance, exams, timetable, assignments, notices, or contacts. Say that official information is unavailable when asked for it.' },
-        { role: 'user', content: message },
-      ],
-    });
+    const history = sessionId ? await supabase.from('message_logs').select('direction,message').eq('student_id', student.student_id).eq('metadata->>session_id', sessionId).order('created_at', { ascending: false }).limit(8) : { data: [] };
+    const previous = (history.data ?? []).reverse().map((item) => ({ role: item.direction === 'inbound' ? 'user' as const : 'assistant' as const, content: item.message }));
+    const messages = [
+      { role: 'system' as const, content: 'You are a concise, friendly college study assistant. Answer greetings and study/general questions only. Never invent official college data, student details, attendance, exams, timetable, assignments, notices, or contacts. Say that official information is unavailable when asked for it.' },
+      ...previous,
+      { role: 'user' as const, content: message },
+    ];
+    let completion;
+    try {
+      completion = await groq.chat.completions.create({ model: config.GROQ_MODEL || 'openai/gpt-oss-120b', temperature: 0.1, max_tokens: 300, messages });
+    } catch (error) {
+      const candidate = error as { status?: number; error?: { code?: string } };
+      if ((candidate.status === 404 || candidate.error?.code === 'model_not_found') && config.GROQ_MODEL !== 'openai/gpt-oss-120b') {
+        logger.warn({ configuredModel: config.GROQ_MODEL, fallbackModel: 'openai/gpt-oss-120b' }, 'Configured Groq model unavailable; retrying with fallback');
+        completion = await groq.chat.completions.create({ model: 'openai/gpt-oss-120b', temperature: 0.1, max_tokens: 300, messages });
+      } else throw error;
+    }
     return completion.choices[0]?.message?.content?.trim() || AI_FAILURE_REPLY;
   } catch (error) {
-    logger.error({ err: error, studentId: student.student_id }, 'Groq response failed');
+    if (config.NODE_ENV === 'development') {
+      const candidate = error as { status?: number; message?: string; error?: unknown; response?: { status?: number; data?: unknown } };
+      const body = candidate.error ?? candidate.response?.data;
+      logger.error({
+        httpStatus: candidate.status ?? candidate.response?.status,
+        errorMessage: candidate.message ?? 'Unknown Groq error',
+        responseBody: typeof body === 'string' ? body.slice(0, 1000) : body,
+        studentId: student.student_id,
+      }, 'Groq response failed (development diagnostic)');
+    } else {
+      logger.error({ studentId: student.student_id }, 'Groq response failed');
+    }
     return AI_FAILURE_REPLY;
   }
 }
@@ -42,23 +63,29 @@ export async function answerStudent(phoneInput: string, message: string, message
   }
   if (!student) return { authenticated: false, text: UNREGISTERED_REPLY, intent: 'UNKNOWN' as ChatbotIntent };
 
+  return answerStudentProfile(student, message, messageId, 'whatsapp');
+}
+
+export async function answerStudentProfile(student: StudentProfile, message: string, sessionId?: string, channel = 'web') {
+  const phone = normalizePhone(student.whatsapp_number);
+
   const profileIntent = detectProfileIntent(message);
   if (profileIntent) {
     const text = buildProfileResponse(student, profileIntent);
-    logConversation(phone, student.student_id, message, text, 'GENERAL_COLLEGE', messageId);
+    logConversation(phone, student.student_id, message, text, 'GENERAL_COLLEGE', sessionId, channel);
     return { authenticated: true, text, studentId: student.student_id, intent: 'GENERAL_COLLEGE' as ChatbotIntent };
   }
 
   const intent = detectChatbotIntent(message);
   if (intent === 'GREETING') {
     const text = `Hello ${student.full_name} 👋\nWelcome to the College AI Assistant. How can I help you today?`;
-    logConversation(phone, student.student_id, message, text, intent, messageId);
+    logConversation(phone, student.student_id, message, text, intent, sessionId, channel);
     return { authenticated: true, text, studentId: student.student_id, intent };
   }
   if (intent === 'GENERAL_COLLEGE') {
     try {
       const text = await fetchGeneralCollegeAnswer();
-      logConversation(phone, student.student_id, message, text, intent, messageId);
+      logConversation(phone, student.student_id, message, text, intent, sessionId, channel);
       return { authenticated: true, text, studentId: student.student_id, intent };
     } catch (error) {
       logger.error({ err: error, studentId: student.student_id, intent }, 'College information query failed');
@@ -68,14 +95,14 @@ export async function answerStudent(phoneInput: string, message: string, message
   if (['ATTENDANCE', 'TIMETABLE', 'ASSIGNMENT', 'EXAM', 'NOTICE', 'EMERGENCY_CONTACT'].includes(intent)) {
     try {
       const text = await fetchStructuredAnswer(student, intent as 'ATTENDANCE' | 'TIMETABLE' | 'ASSIGNMENT' | 'EXAM' | 'NOTICE' | 'EMERGENCY_CONTACT');
-      logConversation(phone, student.student_id, message, text, intent, messageId);
+      logConversation(phone, student.student_id, message, text, intent, sessionId, channel);
       return { authenticated: true, text, studentId: student.student_id, intent };
     } catch (error) {
       logger.error({ err: error, studentId: student.student_id, intent }, 'Structured chatbot query failed');
       return { authenticated: true, text: DB_FAILURE_REPLY, studentId: student.student_id, intent };
     }
   }
-  const text = await answerWithAI(message, student);
-  logConversation(phone, student.student_id, message, text, intent, messageId);
+  const text = await answerWithAI(message, student, sessionId);
+  logConversation(phone, student.student_id, message, text, intent, sessionId, channel);
   return { authenticated: true, text, studentId: student.student_id, intent };
 }

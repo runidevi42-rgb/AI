@@ -89,6 +89,14 @@ export async function findStudent(phone: string) {
   return data as StudentProfile | null;
 }
 
+export async function findStudentById(studentId: number) {
+  const { data, error } = await supabase.from('students')
+    .select('student_id,full_name,whatsapp_number,roll_number,department,course,semester')
+    .eq('student_id', studentId).maybeSingle();
+  if (error) throw error;
+  return data as StudentProfile | null;
+}
+
 function displayTime(value: string | null | undefined) {
   return value ? value.slice(0, 5) : '';
 }

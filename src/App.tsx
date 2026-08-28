@@ -1,8 +1,8 @@
-import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { Navigate, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { Activity, AlertTriangle, Bell, ChevronLeft, ChevronRight, CircleHelp, LayoutDashboard, LogOut, Menu, MessageCircle, PhoneCall, Plus, Search, Send, Trash2, X, Pencil, Users, ClipboardList, GraduationCap, Radio, CheckCircle2, ShieldAlert } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { api, session } from './lib/api';
+import { api, session, studentApi, studentSession } from './lib/api';
 import { resources, type Field, type ResourceConfig } from './lib/resources';
 import type { ApiList, DashboardStats } from '../shared/types';
 import type { EmergencyContact } from '../shared/types';
@@ -12,6 +12,39 @@ function Login() {
   const [loading,setLoading]=useState(false);
   async function submit(e:FormEvent<HTMLFormElement>){e.preventDefault();setLoading(true);const data=new FormData(e.currentTarget);try{const result=await api<{token:string}>('/auth/login',{method:'POST',body:JSON.stringify(Object.fromEntries(data))});session.set(result.token);navigate('/');}catch(err){toast.error(err instanceof Error?err.message:'Login failed')}finally{setLoading(false)}}
   return <main className="login-page"><section className="login-brand"><div className="brand-mark"><MessageCircle size={26}/></div><div><strong>CampusMate</strong><span>College intelligence, connected</span></div><div className="login-quote"><p>One clear place to keep students informed, supported, and on schedule.</p><span>Admin Console</span></div></section><section className="login-panel"><form className="login-form" onSubmit={submit}><div className="mobile-logo"><MessageCircle/><b>CampusMate</b></div><p className="eyebrow">WELCOME BACK</p><h1>Sign in to your workspace</h1><p className="muted">Manage academic information and student communication.</p><label>Email address<input name="email" type="email" autoComplete="email" required placeholder="admin@college.edu"/></label><label>Password<input name="password" type="password" autoComplete="current-password" required placeholder="Enter your password"/></label><button className="primary full" disabled={loading}>{loading?'Signing in...':'Sign in'}</button><p className="secure-note">Secure administrator access</p></form></section></main>
+}
+
+function StudentLogin() {
+  const navigate = useNavigate();
+  const [loading, setLoading] = useState(false);
+  async function submit(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault(); setLoading(true);
+    const data = new FormData(e.currentTarget);
+    try {
+      const result = await studentApi<{ token: string }>('/auth/student-login', { method: 'POST', body: JSON.stringify(Object.fromEntries(data)) });
+      studentSession.set(result.token); navigate('/chat');
+    } catch (error) { toast.error(error instanceof Error ? error.message : 'Student sign-in failed'); }
+    finally { setLoading(false); }
+  }
+  return <main className="login-page"><section className="login-brand"><div className="brand-mark"><MessageCircle size={26}/></div><div><strong>CampusMate</strong><span>College intelligence, connected</span></div><div className="login-quote"><p>Your personal academic assistant, available whenever you need it.</p><span>Student Chat</span></div></section><section className="login-panel"><form className="login-form" onSubmit={submit}><div className="mobile-logo"><MessageCircle/><b>CampusMate</b></div><p className="eyebrow">STUDENT CHAT</p><h1>Open your assistant</h1><p className="muted">Use the student ID and WhatsApp number registered with your college.</p><label>Student ID<input name="student_id" inputMode="numeric" required placeholder="e.g. 1001"/></label><label>Registered WhatsApp number<input name="whatsapp_number" type="tel" autoComplete="tel" required placeholder="9876543210"/></label><button className="primary full" disabled={loading}>{loading?'Checking...':'Continue to chat'}</button><p className="secure-note"><a href="/login">Administrator sign in</a></p></form></section></main>;
+}
+
+type ChatMessage = { role: 'user' | 'assistant'; text: string };
+function ChatPage() {
+  const navigate = useNavigate();
+  const [messages, setMessages] = useState<ChatMessage[]>([{ role: 'assistant', text: 'Hello 👋 I’m CampusMate AI. Ask me about your attendance, timetable, assignments, exams, notices, or study topics.' }]);
+  const [value, setValue] = useState(''); const [loading, setLoading] = useState(false); const [error, setError] = useState('');
+  const endRef = useRef<HTMLDivElement>(null);
+  useEffect(() => { endRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages, loading]);
+  async function send(e?: FormEvent) {
+    e?.preventDefault(); const message = value.trim(); if (!message || loading) return;
+    setValue(''); setError(''); setMessages((items) => [...items, { role: 'user', text: message }]); setLoading(true);
+    try { const result = await studentApi<{ reply: string }>('/chat', { method: 'POST', body: JSON.stringify({ message }) }); setMessages((items) => [...items, { role: 'assistant', text: result.reply }]); }
+    catch (err) { setError(err instanceof Error ? err.message : 'Unable to reach CampusMate AI.'); }
+    finally { setLoading(false); }
+  }
+  function signOut() { studentSession.clear(); navigate('/student-login'); }
+  return <main className="chat-page"><header className="chat-header"><div className="chat-brand"><div className="brand-mark"><MessageCircle size={20}/></div><div><b>CampusMate AI</b><span>Personal college assistant</span></div></div><button className="secondary" onClick={signOut}>Sign out</button></header><section className="chat-card"><div className="chat-messages">{messages.map((item, index) => <div className={`chat-row ${item.role}`} key={`${item.role}-${index}`}><div className="chat-bubble">{item.text}</div></div>)}{loading&&<div className="chat-row assistant"><div className="chat-bubble typing"><i/><i/><i/></div></div>}<div ref={endRef}/></div>{error&&<p className="chat-error">{error}</p>}<form className="chat-composer" onSubmit={send}><input value={value} onChange={(e)=>setValue(e.target.value)} placeholder="Ask CampusMate anything..." aria-label="Message" disabled={loading}/><button className="primary" type="submit" disabled={loading||!value.trim()}><Send size={17}/>Send</button></form></section></main>;
 }
 
 function Shell({children}:{children:ReactNode}){
@@ -70,4 +103,5 @@ function Notifications(){
 }
 
 function Protected(){return session.get()?<Shell><Routes><Route index element={<Dashboard/>}/><Route path="manage/emergency_contacts" element={<EmergencyContactsPage/>}/><Route path="manage/:resource" element={<ResourcePage/>}/><Route path="notifications" element={<Notifications/>}/><Route path="*" element={<Navigate to="/"/>}/></Routes></Shell>:<Navigate to="/login"/>}
-export default function App(){return <Routes><Route path="/login" element={session.get()?<Navigate to="/"/>:<Login/>}/><Route path="/*" element={<Protected/>}/></Routes>}
+function StudentProtected(){return studentSession.get()?<ChatPage/>:<Navigate to="/student-login"/>}
+export default function App(){return <Routes><Route path="/login" element={session.get()?<Navigate to="/"/>:<Login/>}/><Route path="/student-login" element={studentSession.get()?<Navigate to="/chat"/>:<StudentLogin/>}/><Route path="/chat" element={<StudentProtected/>}/><Route path="/*" element={<Protected/>}/></Routes>}

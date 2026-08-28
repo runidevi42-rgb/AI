@@ -10,7 +10,7 @@ const schema = z.object({
   SUPABASE_URL: z.string().url(),
   SUPABASE_SERVICE_ROLE_KEY: z.string().min(10),
   GROQ_API_KEY: z.string().min(10),
-  GROQ_MODEL: z.string().default('llama-3.3-70b-versatile'),
+  GROQ_MODEL: z.string().trim().default('openai/gpt-oss-120b'),
   WHATSAPP_ACCESS_TOKEN: z.string().min(10),
   WHATSAPP_PHONE_NUMBER_ID: z.string().min(2),
   WHATSAPP_VERIFY_TOKEN: z.string().min(8),

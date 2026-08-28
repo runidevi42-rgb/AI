@@ -1,4 +1,5 @@
 import path from 'node:path';
+import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import express from 'express';
 import cors, { type CorsOptions } from 'cors';
@@ -11,6 +12,7 @@ import { logger } from './lib/logger.js';
 import { authRouter } from './routes/auth.js';
 import { adminRouter } from './routes/admin.js';
 import { webhookRouter } from './routes/webhook.js';
+import { chatRouter } from './routes/chat.js';
 import { startScheduler } from './services/scheduler.js';
 import { assertDatabaseConnection } from './lib/supabase.js';
 
@@ -32,8 +34,14 @@ app.use(express.json({ limit: '1mb', verify: (req, _res, buffer) => { (req as ex
 app.use(pinoHttp({ logger }));
 app.use('/api/auth', rateLimit({ windowMs: 15 * 60_000, limit: 30 }), authRouter);
 app.use('/api/admin', rateLimit({ windowMs: 60_000, limit: 300 }), adminRouter);
+app.use('/api/chat', rateLimit({ windowMs: 60_000, limit: 60 }), chatRouter);
 app.use('/webhook/whatsapp', webhookRouter);
-if (config.NODE_ENV !== 'production') {
+const dirname = path.dirname(fileURLToPath(import.meta.url));
+const clientPath = path.resolve(dirname, '../../dist');
+const clientIndex = path.join(clientPath, 'index.html');
+const hasBuiltClient = fs.existsSync(clientIndex);
+
+if (!hasBuiltClient) {
   app.get('/', (_req, res) => res.json({
     status: 'ok',
     service: 'CampusMate AI backend',
@@ -52,9 +60,7 @@ app.get('/api/health/database', async (_req, res) => {
 app.use('/api', (_req, res) => res.status(404).json({ error: 'API route not found' }));
 app.use('/webhook', (_req, res) => res.status(404).json({ error: 'Webhook route not found' }));
 
-if (config.NODE_ENV === 'production') {
-  const dirname = path.dirname(fileURLToPath(import.meta.url));
-  const clientPath = path.resolve(dirname, '../../dist');
+if (hasBuiltClient) {
   app.use(express.static(clientPath));
   app.get('*splat', (_req, res) => res.sendFile(path.join(clientPath, 'index.html')));
 }

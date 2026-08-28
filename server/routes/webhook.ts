@@ -59,7 +59,7 @@ webhookRouter.post('/', asyncHandler(async (req, res) => {
 
     try {
       const reply = await answerStudent(senderNumber, item.text.body, item.id);
-      await sendText(senderNumber, reply.text, { studentId: reply.studentId });
+      await sendText(senderNumber, reply.text, { studentId: 'studentId' in reply ? reply.studentId : undefined });
     } catch (error) {
       logger.error({ err: error, messageId: item.id }, 'Could not process incoming message');
       await sendText(senderNumber, 'I am temporarily unable to process this question. Please try again.');
