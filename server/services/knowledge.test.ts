@@ -36,6 +36,10 @@ describe('profile questions', () => {
     ["What's my name?", 'name'],
     ['Tell me my roll no.', 'roll_number'],
     ['What is my student ID?', 'student_id'],
+    ['What is my department?', 'department'],
+    ['What is my course?', 'course'],
+    ['Which semester am I in?', 'semester'],
+    ['What is my phone number?', 'whatsapp_number'],
     ['Show me my profile details', 'profile'],
   ])('detects %s without using AI', (query, intent) => {
     expect(detectProfileIntent(query)).toBe(intent);

@@ -5,7 +5,7 @@ import { normalizePhone } from './whatsapp.js';
 import { config } from '../config.js';
 
 export type Intent = 'timetable' | 'assignments' | 'exams' | 'attendance' | 'faculty' | 'events' | 'placements' | 'emergency' | 'general';
-export type ProfileIntent = 'name' | 'roll_number' | 'student_id' | 'profile';
+export type ProfileIntent = 'name' | 'roll_number' | 'student_id' | 'department' | 'course' | 'semester' | 'whatsapp_number' | 'profile';
 
 export interface StudentProfile {
   student_id: number;
@@ -26,6 +26,10 @@ export function detectProfileIntent(query: string): ProfileIntent | null {
   if (/\b(my student id|student id|student number)\b/.test(normalized)) return 'student_id';
   if (/\b(my roll number|my roll no|roll number|roll no)\b/.test(normalized)) return 'roll_number';
   if (/\b(what is my name|what s my name|tell me my name|who am i)\b/.test(normalized)) return 'name';
+  if (/\b(my department|which department am i in|what department am i in)\b/.test(normalized)) return 'department';
+  if (/\b(my course|which course am i in|what course am i in)\b/.test(normalized)) return 'course';
+  if (/\b(my semester|which semester am i in|what semester am i in)\b/.test(normalized)) return 'semester';
+  if (/\b(my whatsapp number|my phone number|my mobile number)\b/.test(normalized)) return 'whatsapp_number';
   return null;
 }
 
@@ -33,6 +37,10 @@ export function buildProfileResponse(student: StudentProfile, intent: ProfileInt
   if (intent === 'name') return `Your name is ${student.full_name}.`;
   if (intent === 'roll_number') return `Your roll number is ${student.roll_number}.`;
   if (intent === 'student_id') return `Your student ID is ${student.student_id}.`;
+  if (intent === 'department') return `Your department is ${student.department}.`;
+  if (intent === 'course') return `Your course is ${student.course}.`;
+  if (intent === 'semester') return `You are in semester ${student.semester}.`;
+  if (intent === 'whatsapp_number') return `Your registered WhatsApp number is ${student.whatsapp_number}.`;
   return [
     '*Your student profile*',
     `Name: ${student.full_name}`,
