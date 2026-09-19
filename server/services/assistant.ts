@@ -2,7 +2,7 @@ import Groq from 'groq-sdk';
 import { config } from '../config.js';
 import { logger } from '../lib/logger.js';
 import { supabase } from '../lib/supabase.js';
-import { buildProfileResponse, detectProfileIntent, fetchGeneralCollegeAnswer, fetchStructuredAnswer, findStudent, UNREGISTERED_REPLY, type StudentProfile } from './knowledge.js';
+import { buildProfileResponse, detectProfileIntent, fetchCompleteStructuredAnswer, fetchGeneralCollegeAnswer, findStudent, UNREGISTERED_REPLY, type StudentProfile } from './knowledge.js';
 import { detectChatbotIntent, type ChatbotIntent } from './intent.js';
 import { normalizePhone } from './whatsapp.js';
 
@@ -11,10 +11,20 @@ const AI_FAILURE_REPLY = 'I am temporarily unable to process this question. Plea
 const DB_FAILURE_REPLY = 'The college database is temporarily unavailable. Please try again later.';
 
 function logConversation(phone: string, studentId: number | undefined, incoming: string, response: string, intent: ChatbotIntent, messageId?: string, channel = 'whatsapp') {
+  const storageChannel = channel === 'web' ? 'web_push' : channel;
   void supabase.from('message_logs').insert([
-    { phone, student_id: studentId, direction: 'inbound', message: incoming, status: 'received', provider_message_id: channel === 'whatsapp' ? messageId : undefined, channel: 'whatsapp', metadata: { intent, channel, session_id: messageId } },
-    { phone, student_id: studentId, direction: 'outbound', message: response, status: 'generated', channel: 'whatsapp', metadata: { intent, channel, session_id: messageId } },
+    { phone, student_id: studentId, direction: 'inbound', message: incoming, status: 'received', provider_message_id: channel === 'whatsapp' ? messageId : undefined, channel: storageChannel, metadata: { intent, channel, session_id: messageId } },
+    { phone, student_id: studentId, direction: 'outbound', message: response, status: 'generated', channel: storageChannel, metadata: { intent, channel, session_id: messageId } },
   ]).then(({ error }) => { if (error) logger.warn({ message: error.message, code: error.code }, 'Conversation audit log failed'); });
+}
+
+export function getWebSessionId(studentId: number) { return `web-${studentId}`; }
+
+export async function getWebConversation(studentId: number) {
+  const sessionId = getWebSessionId(studentId);
+  const result = await supabase.from('message_logs').select('direction,message,created_at,metadata').eq('student_id', studentId).eq('channel', 'web_push').eq('metadata->>session_id', sessionId).order('created_at', { ascending: true }).limit(100);
+  if (result.error) throw result.error;
+  return { sessionId, messages: (result.data ?? []).map((row) => ({ role: row.direction === 'inbound' ? 'user' : 'assistant', text: row.message, createdAt: row.created_at })) };
 }
 
 async function answerWithAI(message: string, student: StudentProfile, sessionId?: string) {
@@ -76,7 +86,14 @@ export async function answerStudentProfile(student: StudentProfile, message: str
     return { authenticated: true, text, studentId: student.student_id, intent: 'GENERAL_COLLEGE' as ChatbotIntent };
   }
 
-  const intent = detectChatbotIntent(message);
+  let intent = detectChatbotIntent(message);
+  let dataQuery = message;
+  if (intent === 'UNKNOWN' && sessionId) {
+    const previous = await supabase.from('message_logs').select('message,metadata').eq('student_id', student.student_id).eq('channel', channel === 'web' ? 'web_push' : channel).eq('metadata->>session_id', sessionId).eq('direction', 'inbound').order('created_at', { ascending: false }).limit(1).maybeSingle();
+    if (previous.data?.message) dataQuery = `${previous.data.message} ${message}`;
+    const priorIntent = previous.data?.metadata && typeof previous.data.metadata === 'object' && 'intent' in previous.data.metadata ? String((previous.data.metadata as Record<string, unknown>).intent) : '';
+    if (['ATTENDANCE', 'TIMETABLE', 'ASSIGNMENT', 'EXAM', 'NOTICE', 'EMERGENCY_CONTACT'].includes(priorIntent)) intent = priorIntent as ChatbotIntent;
+  }
   if (intent === 'GREETING') {
     const text = `Hello ${student.full_name} 👋\nWelcome to the College AI Assistant. How can I help you today?`;
     logConversation(phone, student.student_id, message, text, intent, sessionId, channel);
@@ -94,7 +111,7 @@ export async function answerStudentProfile(student: StudentProfile, message: str
   }
   if (['ATTENDANCE', 'TIMETABLE', 'ASSIGNMENT', 'EXAM', 'NOTICE', 'EMERGENCY_CONTACT'].includes(intent)) {
     try {
-      const text = await fetchStructuredAnswer(student, intent as 'ATTENDANCE' | 'TIMETABLE' | 'ASSIGNMENT' | 'EXAM' | 'NOTICE' | 'EMERGENCY_CONTACT');
+      const text = await fetchCompleteStructuredAnswer(student, intent as 'ATTENDANCE' | 'TIMETABLE' | 'ASSIGNMENT' | 'EXAM' | 'NOTICE' | 'EMERGENCY_CONTACT', dataQuery);
       logConversation(phone, student.student_id, message, text, intent, sessionId, channel);
       return { authenticated: true, text, studentId: student.student_id, intent };
     } catch (error) {

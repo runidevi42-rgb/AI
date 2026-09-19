@@ -1,6 +1,17 @@
 import { describe, expect, it } from 'vitest';
 import { buildProfileResponse, detectIntent, detectProfileIntent, type StudentProfile } from './knowledge.js';
 import { normalizePhone } from './whatsapp.js';
+import { detectChatbotIntent } from './intent.js';
+
+describe('chatbot language understanding', () => {
+  it.each([
+    ['Meri attendance kitni hai?', 'ATTENDANCE'],
+    ['Aaj mera timetable kya hai?', 'TIMETABLE'],
+    ['Mera next exam kab hai?', 'EXAM'],
+    ['Koi assignment pending hai?', 'ASSIGNMENT'],
+    ['Koi new notice hai?', 'NOTICE'],
+  ])('routes %s to %s', (query, intent) => expect(detectChatbotIntent(query)).toBe(intent));
+});
 
 describe('detectIntent', () => {
   it.each([
@@ -34,6 +45,9 @@ describe('profile questions', () => {
   it.each([
     ['What is my name?', 'name'],
     ["What's my name?", 'name'],
+    ['Mera naam kya hai?', 'name'],
+    ['My name', 'name'],
+    ['What is your name?', 'assistant_identity'],
     ['Tell me my roll no.', 'roll_number'],
     ['What is my student ID?', 'student_id'],
     ['What is my department?', 'department'],

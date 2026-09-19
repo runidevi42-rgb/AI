@@ -30,11 +30,18 @@ function StudentLogin() {
 }
 
 type ChatMessage = { role: 'user' | 'assistant'; text: string };
-function ChatPage() {
+function LegacyChatPage() {
   const navigate = useNavigate();
   const [messages, setMessages] = useState<ChatMessage[]>([{ role: 'assistant', text: 'Hello 👋 I’m CampusMate AI. Ask me about your attendance, timetable, assignments, exams, notices, or study topics.' }]);
   const [value, setValue] = useState(''); const [loading, setLoading] = useState(false); const [error, setError] = useState('');
   const endRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    let active = true;
+    studentApi<{ messages: ChatMessage[] }>('/chat/history').then((result) => {
+      if (active && result.messages.length) setMessages(result.messages);
+    }).catch(() => undefined);
+    return () => { active = false; };
+  }, []);
   useEffect(() => { endRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages, loading]);
   async function send(e?: FormEvent) {
     e?.preventDefault(); const message = value.trim(); if (!message || loading) return;
@@ -45,6 +52,37 @@ function ChatPage() {
   }
   function signOut() { studentSession.clear(); navigate('/student-login'); }
   return <main className="chat-page"><header className="chat-header"><div className="chat-brand"><div className="brand-mark"><MessageCircle size={20}/></div><div><b>CampusMate AI</b><span>Personal college assistant</span></div></div><button className="secondary" onClick={signOut}>Sign out</button></header><section className="chat-card"><div className="chat-messages">{messages.map((item, index) => <div className={`chat-row ${item.role}`} key={`${item.role}-${index}`}><div className="chat-bubble">{item.text}</div></div>)}{loading&&<div className="chat-row assistant"><div className="chat-bubble typing"><i/><i/><i/></div></div>}<div ref={endRef}/></div>{error&&<p className="chat-error">{error}</p>}<form className="chat-composer" onSubmit={send}><input value={value} onChange={(e)=>setValue(e.target.value)} placeholder="Ask CampusMate anything..." aria-label="Message" disabled={loading}/><button className="primary" type="submit" disabled={loading||!value.trim()}><Send size={17}/>Send</button></form></section></main>;
+}
+
+void LegacyChatPage;
+
+function ChatPage() {
+  const navigate = useNavigate();
+  const [messages, setMessages] = useState<ChatMessage[]>([{ role: 'assistant', text: 'Hello! I am CampusMate AI. Ask me about your attendance, timetable, assignments, exams, notices, or study topics.' }]);
+  const [value, setValue] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const endRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    let active = true;
+    studentApi<{ messages: ChatMessage[] }>('/chat/history').then((result) => {
+      if (active && result.messages.length) setMessages(result.messages);
+    }).catch(() => undefined);
+    return () => { active = false; };
+  }, []);
+  useEffect(() => { endRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages, loading]);
+  async function send(e?: FormEvent) {
+    e?.preventDefault();
+    const message = value.trim();
+    if (!message || loading) return;
+    setValue(''); setError(''); setMessages((items) => [...items, { role: 'user', text: message }]); setLoading(true);
+    try {
+      const result = await studentApi<{ reply: string }>('/chat', { method: 'POST', body: JSON.stringify({ message }) });
+      setMessages((items) => [...items, { role: 'assistant', text: result.reply }]);
+    } catch (err) { setError(err instanceof Error ? err.message : 'Unable to reach CampusMate AI.'); }
+    finally { setLoading(false); }
+  }
+  return <main className="chat-page"><header className="chat-header"><div className="chat-brand"><div className="brand-mark"><MessageCircle size={20}/></div><div><b>CampusMate AI</b><span>Personal college assistant</span></div></div><button className="secondary" onClick={() => { studentSession.clear(); navigate('/student-login'); }}>Sign out</button></header><section className="chat-card"><div className="chat-messages">{messages.map((item, index) => <div className={`chat-row ${item.role}`} key={`${item.role}-${index}`}><div className="chat-bubble">{item.text}</div></div>)}{loading && <div className="chat-row assistant"><div className="chat-bubble typing"><i/><i/><i/></div></div>}<div ref={endRef}/></div>{error && <p className="chat-error">{error}</p>}<form className="chat-composer" onSubmit={send}><textarea value={value} onChange={(e) => setValue(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void send(e); } }} placeholder="Ask CampusMate anything..." aria-label="Message" disabled={loading} rows={1}/><button className="primary" type="submit" disabled={loading || !value.trim()}><Send size={17}/>Send</button></form></section></main>;
 }
 
 function Shell({children}:{children:ReactNode}){
