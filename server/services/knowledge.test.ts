@@ -7,6 +7,10 @@ describe('chatbot language understanding', () => {
   it.each([
     ['Meri attendance kitni hai?', 'ATTENDANCE'],
     ['Aaj mera timetable kya hai?', 'TIMETABLE'],
+    ['Which class is next?', 'TIMETABLE'],
+    ["What's my next lecture?", 'TIMETABLE'],
+    ['Aaj next class kya hai?', 'TIMETABLE'],
+    ['After this class, what do I have?', 'TIMETABLE'],
     ['Mera next exam kab hai?', 'EXAM'],
     ['Koi assignment pending hai?', 'ASSIGNMENT'],
     ['Koi new notice hai?', 'NOTICE'],

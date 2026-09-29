@@ -10,12 +10,15 @@ const groq = new Groq({ apiKey: config.GROQ_API_KEY });
 const AI_FAILURE_REPLY = 'I am temporarily unable to process this question. Please try again.';
 const DB_FAILURE_REPLY = 'The college database is temporarily unavailable. Please try again later.';
 
-function logConversation(phone: string, studentId: number | undefined, incoming: string, response: string, intent: ChatbotIntent, messageId?: string, channel = 'whatsapp') {
+export function getWhatsAppSessionId(studentId: number) { return `whatsapp-${studentId}`; }
+
+async function logConversation(phone: string, studentId: number | undefined, incoming: string, response: string, intent: ChatbotIntent, sessionId?: string, channel = 'whatsapp', messageId?: string) {
   const storageChannel = channel === 'web' ? 'web_push' : channel;
-  void supabase.from('message_logs').insert([
-    { phone, student_id: studentId, direction: 'inbound', message: incoming, status: 'received', provider_message_id: channel === 'whatsapp' ? messageId : undefined, channel: storageChannel, metadata: { intent, channel, session_id: messageId } },
-    { phone, student_id: studentId, direction: 'outbound', message: response, status: 'generated', channel: storageChannel, metadata: { intent, channel, session_id: messageId } },
-  ]).then(({ error }) => { if (error) logger.warn({ message: error.message, code: error.code }, 'Conversation audit log failed'); });
+  const { error } = await supabase.from('message_logs').insert([
+    { phone, student_id: studentId, direction: 'inbound', message: incoming, status: 'received', provider_message_id: channel === 'whatsapp' ? messageId : undefined, channel: storageChannel, metadata: { intent, channel, session_id: sessionId } },
+    { phone, student_id: studentId, direction: 'outbound', message: response, status: 'generated', channel: storageChannel, metadata: { intent, channel, session_id: sessionId } },
+  ]);
+  if (error) logger.warn({ message: error.message, code: error.code }, 'Conversation audit log failed');
 }
 
 export function getWebSessionId(studentId: number) { return `web-${studentId}`; }
@@ -73,16 +76,16 @@ export async function answerStudent(phoneInput: string, message: string, message
   }
   if (!student) return { authenticated: false, text: UNREGISTERED_REPLY, intent: 'UNKNOWN' as ChatbotIntent };
 
-  return answerStudentProfile(student, message, messageId, 'whatsapp');
+  return answerStudentProfile(student, message, getWhatsAppSessionId(student.student_id), 'whatsapp', messageId);
 }
 
-export async function answerStudentProfile(student: StudentProfile, message: string, sessionId?: string, channel = 'web') {
+export async function answerStudentProfile(student: StudentProfile, message: string, sessionId?: string, channel = 'web', messageId?: string) {
   const phone = normalizePhone(student.whatsapp_number);
 
   const profileIntent = detectProfileIntent(message);
   if (profileIntent) {
     const text = buildProfileResponse(student, profileIntent);
-    logConversation(phone, student.student_id, message, text, 'GENERAL_COLLEGE', sessionId, channel);
+    await logConversation(phone, student.student_id, message, text, 'GENERAL_COLLEGE', sessionId, channel, messageId);
     return { authenticated: true, text, studentId: student.student_id, intent: 'GENERAL_COLLEGE' as ChatbotIntent };
   }
 
@@ -96,13 +99,13 @@ export async function answerStudentProfile(student: StudentProfile, message: str
   }
   if (intent === 'GREETING') {
     const text = `Hello ${student.full_name} 👋\nWelcome to the College AI Assistant. How can I help you today?`;
-    logConversation(phone, student.student_id, message, text, intent, sessionId, channel);
+    await logConversation(phone, student.student_id, message, text, intent, sessionId, channel, messageId);
     return { authenticated: true, text, studentId: student.student_id, intent };
   }
   if (intent === 'GENERAL_COLLEGE') {
     try {
       const text = await fetchGeneralCollegeAnswer();
-      logConversation(phone, student.student_id, message, text, intent, sessionId, channel);
+      await logConversation(phone, student.student_id, message, text, intent, sessionId, channel, messageId);
       return { authenticated: true, text, studentId: student.student_id, intent };
     } catch (error) {
       logger.error({ err: error, studentId: student.student_id, intent }, 'College information query failed');
@@ -112,7 +115,7 @@ export async function answerStudentProfile(student: StudentProfile, message: str
   if (['ATTENDANCE', 'TIMETABLE', 'ASSIGNMENT', 'EXAM', 'NOTICE', 'EMERGENCY_CONTACT'].includes(intent)) {
     try {
       const text = await fetchCompleteStructuredAnswer(student, intent as 'ATTENDANCE' | 'TIMETABLE' | 'ASSIGNMENT' | 'EXAM' | 'NOTICE' | 'EMERGENCY_CONTACT', dataQuery);
-      logConversation(phone, student.student_id, message, text, intent, sessionId, channel);
+      await logConversation(phone, student.student_id, message, text, intent, sessionId, channel, messageId);
       return { authenticated: true, text, studentId: student.student_id, intent };
     } catch (error) {
       logger.error({ err: error, studentId: student.student_id, intent }, 'Structured chatbot query failed');
@@ -120,6 +123,6 @@ export async function answerStudentProfile(student: StudentProfile, message: str
     }
   }
   const text = await answerWithAI(message, student, sessionId);
-  logConversation(phone, student.student_id, message, text, intent, sessionId, channel);
+  await logConversation(phone, student.student_id, message, text, intent, sessionId, channel, messageId);
   return { authenticated: true, text, studentId: student.student_id, intent };
 }

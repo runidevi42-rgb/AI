@@ -6,7 +6,7 @@ export function detectChatbotIntent(input: string): ChatbotIntent {
   const q = input.toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9\s?]/g, ' ');
   if (/\b(hi|hello|hey|namaste|good morning|good afternoon|good evening)\b/.test(q)) return 'GREETING';
   if (/\b(attendance|present|absent|percentage|meri attendance|meri hazri|kitni attendance)\b/.test(q)) return 'ATTENDANCE';
-  if (/\b(timetable|time table|class|classes|lecture|schedule|aaj.*(class|timetable|schedule)|mera timetable)\b/.test(q)) return 'TIMETABLE';
+  if (/\b(next class|next lecture|next period|what do i have next|which class.*next|after this class|agla class|next\s+class|next\s+lecture|next\s+period|timetable|time table|class|classes|lecture|schedule|aaj.*(class|timetable|schedule)|mera timetable|meri next class|aaj next class)\b/.test(q)) return 'TIMETABLE';
   if (/\b(assignment|homework|submission|deadline|pending.*assignment|koi assignment)\b/.test(q)) return 'ASSIGNMENT';
   if (/\b(exam|examination|test|assessment|hall ticket|next exam|mera exam|exam kab)\b/.test(q)) return 'EXAM';
   if (/\b(notice|announcement|circular|latest update|new update|koi new notice|naya notice)\b/.test(q)) return 'NOTICE';

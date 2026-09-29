@@ -1,8 +1,8 @@
-import { format, startOfDay } from 'date-fns';
 import { logger } from '../lib/logger.js';
 import { supabase } from '../lib/supabase.js';
 import { normalizePhone } from './whatsapp.js';
 import { config } from '../config.js';
+import { formatCollegeTime, getCurrentCollegeDateTime, timeToMinutes } from '../utils/college-time.js';
 
 export type Intent = 'timetable' | 'assignments' | 'exams' | 'attendance' | 'faculty' | 'events' | 'placements' | 'emergency' | 'general';
 export type ProfileIntent = 'name' | 'roll_number' | 'student_id' | 'department' | 'course' | 'semester' | 'whatsapp_number' | 'assistant_identity' | 'profile';
@@ -19,6 +19,7 @@ export interface StudentProfile {
 
 export const UNREGISTERED_REPLY = 'Your WhatsApp number is not registered with the college. Please contact the college administration.';
 export const NO_INFORMATION_REPLY = 'I could not find any information for this request in the college database.';
+export const NO_CLASSES_TODAY_REPLY = 'You have no more classes scheduled for today.';
 
 export function detectProfileIntent(query: string): ProfileIntent | null {
   const normalized = query.toLowerCase().replace(/[?.!,'’]/g, ' ').replace(/\s+/g, ' ').trim();
@@ -107,8 +108,49 @@ export async function findStudentById(studentId: number) {
   return data as StudentProfile | null;
 }
 
-function displayTime(value: string | null | undefined) {
-  return value ? value.slice(0, 5) : '';
+function displayTime(value: string | null | undefined) { return formatCollegeTime(value); }
+
+export function timetableRowsForStudent(rows: any[], student: StudentProfile) {
+  const studentGroup = (student as StudentProfile & { batch_group?: string; batch?: string; section?: string });
+  const group = studentGroup.batch_group || studentGroup.batch || studentGroup.section;
+  const seen = new Set<string>();
+  return rows.filter((row) => {
+    if (row.department && student.department && String(row.department).toLowerCase() !== String(student.department).toLowerCase()) return false;
+    if (row.course && student.course && String(row.course).toLowerCase() !== String(student.course).toLowerCase()) return false;
+    if (row.semester != null && student.semester != null && Number(row.semester) !== Number(student.semester)) return false;
+    const rowGroup = row.batch_group || row.batch || row.section;
+    // A batch-specific record is not safe to show until the authenticated student
+    // has a matching group in the students table. Never guess a section from roll no.
+    if (rowGroup && (!group || String(rowGroup).toLowerCase() !== String(group).toLowerCase())) return false;
+    if (row.is_recess || /^recess|no class$/i.test(String(row.subject || '').trim())) return false;
+    if (timeToMinutes(row.start_time) === null || timeToMinutes(row.end_time) === null) return false;
+    const key = [row.day_of_week, row.start_time, row.end_time, row.subject, row.teacher, row.room, row.batch_group].map(String).join('|');
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+export async function getNextClass(student: StudentProfile, now = new Date()) {
+  const collegeNow = getCurrentCollegeDateTime(now);
+  const result = await supabase.from('timetables').select('*').ilike('day_of_week', collegeNow.weekday).order('start_time').limit(100);
+  if (isMissingRelation(result.error)) return null;
+  if (result.error) throw result.error;
+  const rows = timetableRowsForStudent(result.data ?? [], student);
+  const currentMinutes = collegeNow.hour * 60 + collegeNow.minute;
+  const selected = rows.filter((row) => (timeToMinutes(row.start_time) ?? -1) > currentMinutes)
+    .sort((a, b) => (timeToMinutes(a.start_time) ?? 0) - (timeToMinutes(b.start_time) ?? 0));
+  if (config.NODE_ENV === 'development') logger.info({
+    studentId: student.student_id,
+    department: student.department,
+    course: student.course,
+    semester: student.semester,
+    currentDate: collegeNow.date,
+    currentTime: collegeNow.time,
+    timezone: collegeNow.timezone,
+    selectedRecords: selected.map((row) => ({ day: row.day_of_week, start: row.start_time, end: row.end_time, subject: row.subject, room: row.room ?? null })),
+  }, 'Next timetable record selected');
+  return selected[0] ?? null;
 }
 
 export async function fetchStructuredAnswer(student: StudentProfile, intent: 'ATTENDANCE' | 'TIMETABLE' | 'ASSIGNMENT' | 'EXAM' | 'NOTICE' | 'EMERGENCY_CONTACT', _query = '') {
@@ -164,7 +206,8 @@ function isMissingRelation(error: { code?: string } | null | undefined) {
 export async function fetchCompleteStructuredAnswer(student: StudentProfile, intent: 'ATTENDANCE' | 'TIMETABLE' | 'ASSIGNMENT' | 'EXAM' | 'NOTICE' | 'EMERGENCY_CONTACT', query = '') {
   const q = query.toLowerCase();
   const now = new Date();
-  const today = now.toISOString().slice(0, 10);
+  const collegeNow = getCurrentCollegeDateTime(now);
+  const today = collegeNow.date;
   const scope = { department: student.department, semester: student.semester };
   const full = /\b(full|all|complete|entire|subject wise|subject-wise)\b/.test(q);
   if (intent === 'ATTENDANCE') {
@@ -180,38 +223,35 @@ export async function fetchCompleteStructuredAnswer(student: StudentProfile, int
     return `Your current attendance is ${overall}%.\n` + ordered.map((row) => `- ${row.subject}: ${row.percentage}% (${row.present_classes}/${row.total_classes} classes)`).join('\n');
   }
   if (intent === 'TIMETABLE') {
-    const day = new Intl.DateTimeFormat('en-US', { weekday: 'long', timeZone: config.COLLEGE_TIMEZONE }).format(now);
-    const nextClass = /next class|which class.*next|agla class/.test(q);
+    const day = collegeNow.weekday;
+    const nextClass = /next class|next lecture|next period|what do i have next|which class.*next|after this class|agla class|meri next class|aaj next class/.test(q);
+    if (nextClass) {
+      const row = await getNextClass(student, now);
+      if (!row) return NO_CLASSES_TODAY_REPLY;
+      const room = row.room ? ` in ${row.room}` : /\b(room|where)\b/.test(q) ? ' (room information is not available)' : '';
+      return `Your next class is ${row.subject} at ${displayTime(row.start_time)}${room}.`;
+    }
     // The deployed timetable table is intentionally read with `*` because existing
     // installations use different optional columns (for example, some have `room`
     // while the current table has `teacher`, `batch_group`, and `is_recess`). This
     // keeps the chatbot compatible with the real schema without inventing columns.
     let queryBuilder = supabase.from('timetables').select('*').order('day_of_week').order('start_time');
-    if (!full && !nextClass && /today|aaj|schedule/.test(q)) queryBuilder = queryBuilder.ilike('day_of_week', day);
+    if (!full && /today|aaj|schedule/.test(q)) queryBuilder = queryBuilder.ilike('day_of_week', day);
     const result = await queryBuilder.limit(100);
     if (isMissingRelation(result.error)) return NO_INFORMATION_REPLY;
     if (result.error) throw result.error;
-    let rows = (result.data ?? []).filter((row: any) => {
-      // If a deployment has scope columns, apply them. The current live table does
-      // not, so its shared timetable remains usable instead of failing the request.
-      if (row.department && student.department && String(row.department).toLowerCase() !== String(student.department).toLowerCase()) return false;
-      if (row.semester != null && student.semester != null && Number(row.semester) !== Number(student.semester)) return false;
-      return !row.is_recess && !/^recess|no class$/i.test(String(row.subject || '').trim());
-    });
+    const rows = timetableRowsForStudent(result.data ?? [], student);
+    if (config.NODE_ENV === 'development') logger.info({
+      studentId: student.student_id,
+      department: student.department,
+      course: student.course,
+      semester: student.semester,
+      currentDate: collegeNow.date,
+      currentTime: collegeNow.time,
+      timezone: collegeNow.timezone,
+      selectedRecords: rows.map((row) => ({ day: row.day_of_week, start: row.start_time, end: row.end_time, subject: row.subject, room: row.room ?? null })),
+    }, 'Timetable records selected');
     if (!rows.length) return NO_INFORMATION_REPLY;
-    if (nextClass) {
-      const week = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-      const todayIndex = week.indexOf(day);
-      const currentTime = now.toTimeString().slice(0, 8);
-      rows = [...rows].sort((a, b) => {
-        const dayDelta = ((week.indexOf(a.day_of_week) - todayIndex + 7) % 7) - ((week.indexOf(b.day_of_week) - todayIndex + 7) % 7);
-        if (dayDelta !== 0) return dayDelta;
-        return String(a.start_time).localeCompare(String(b.start_time));
-      });
-      const todayRows = rows.filter((row) => row.day_of_week === day && String(row.start_time) >= currentTime);
-      rows = (todayRows.length ? todayRows : rows).slice(0, 1);
-    }
-    if (nextClass) return `Your next class is:\n${rows.map((row) => `- ${row.day_of_week}: ${row.subject} ${displayTime(row.start_time)}-${displayTime(row.end_time)}${row.room ? ` (${row.room})` : ''}`).join('\n')}`;
     return `${full ? 'Your complete timetable is:' : `Your classes on ${day} are:`}\n` + rows.map((row) => `- ${row.day_of_week}: ${row.subject} ${displayTime(row.start_time)}-${displayTime(row.end_time)}${row.room ? ` (${row.room})` : ''}`).join('\n');
   }
   if (intent === 'ASSIGNMENT') {
@@ -220,7 +260,7 @@ export async function fetchCompleteStructuredAnswer(student: StudentProfile, int
     const result = await queryBuilder.limit(!full && /next|upcoming/.test(q) ? 1 : 50);
     if (result.error) throw result.error;
     const rows = result.data ?? [];
-    return rows.length ? rows.map((row) => `- ${row.title} - ${row.subject}, due ${new Date(row.due_at).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' })}${row.description ? `\n  ${row.description}` : ''}`).join('\n') : NO_INFORMATION_REPLY;
+    return rows.length ? rows.map((row) => `- ${row.title} - ${row.subject}, due ${new Date(row.due_at).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short', timeZone: config.COLLEGE_TIMEZONE })}${row.description ? `\n  ${row.description}` : ''}`).join('\n') : NO_INFORMATION_REPLY;
   }
   if (intent === 'EXAM') {
     let queryBuilder = supabase.from('exams').select('title,subject,exam_date,start_time,end_time,instructions').match(scope).order('exam_date').order('start_time');
@@ -260,13 +300,13 @@ function compact(data: unknown) {
 export async function retrieveContext(student: StudentProfile, query: string) {
   const intent = detectIntent(query);
   const today = new Date();
-  const date = format(today, 'yyyy-MM-dd');
+  const collegeNow = getCurrentCollegeDateTime(today);
+  const date = collegeNow.date;
   const scope = { department: student.department, semester: student.semester };
   let records: unknown[] = [];
 
   if (intent === 'timetable') {
-    const day = format(today, 'EEEE');
-    const { data } = await supabase.from('timetables').select('day_of_week,start_time,end_time,subject,room,faculty:faculty(full_name)').match(scope).ilike('day_of_week', day).order('start_time');
+    const { data } = await supabase.from('timetables').select('*').ilike('day_of_week', collegeNow.weekday).order('start_time');
     records = data ?? [];
   } else if (intent === 'assignments') {
     const { data } = await supabase.from('assignments').select('title,subject,description,due_at').eq('department', scope.department).eq('semester', scope.semester).gte('due_at', today.toISOString()).order('due_at').limit(10);
@@ -282,7 +322,7 @@ export async function retrieveContext(student: StudentProfile, query: string) {
     records = data ?? [];
   } else if (intent === 'events') {
     const [{ data: events }, { data: notices }] = await Promise.all([
-      supabase.from('events').select('title,description,start_at,end_at,venue,event_type').gte('end_at', startOfDay(today).toISOString()).order('start_at').limit(10),
+      supabase.from('events').select('title,description,start_at,end_at,venue,event_type').gte('end_at', today.toISOString()).order('start_at').limit(10),
       supabase.from('notices').select('title,content,category,published_at,expires_at').lte('published_at', today.toISOString()).or(`expires_at.is.null,expires_at.gte.${today.toISOString()}`).order('published_at', { ascending: false }).limit(8),
     ]);
     records = [...(events ?? []), ...(notices ?? [])];
@@ -302,7 +342,7 @@ export async function retrieveContext(student: StudentProfile, query: string) {
 
   return compact({
     intent,
-    currentDate: format(today, 'EEEE, d MMMM yyyy'),
+    currentDate: `${collegeNow.weekday}, ${collegeNow.date}`,
     student: { name: student.full_name, rollNumber: student.roll_number, department: student.department, course: student.course, semester: student.semester },
     records,
   });
