@@ -157,6 +157,10 @@ export async function fetchStructuredAnswer(student: StudentProfile, intent: 'AT
   return records.length ? records.map((r) => `• ${r.contact_name}: ${r.phone_number} (${r.role_or_service})`).join('\n') : NO_INFORMATION_REPLY;
 }
 
+function isMissingRelation(error: { code?: string } | null | undefined) {
+  return error?.code === 'PGRST205' || error?.code === '42P01';
+}
+
 export async function fetchCompleteStructuredAnswer(student: StudentProfile, intent: 'ATTENDANCE' | 'TIMETABLE' | 'ASSIGNMENT' | 'EXAM' | 'NOTICE' | 'EMERGENCY_CONTACT', query = '') {
   const q = query.toLowerCase();
   const now = new Date();
@@ -180,6 +184,7 @@ export async function fetchCompleteStructuredAnswer(student: StudentProfile, int
     let queryBuilder = supabase.from('timetables').select('day_of_week,start_time,end_time,subject,room').match(scope).order('day_of_week').order('start_time');
     if (!full && /today|aaj|next class|schedule/.test(q)) queryBuilder = queryBuilder.ilike('day_of_week', day);
     const result = await queryBuilder.limit(!full && /next class/.test(q) ? 1 : 50);
+    if (isMissingRelation(result.error)) return NO_INFORMATION_REPLY;
     if (result.error) throw result.error;
     const rows = result.data ?? [];
     if (!rows.length) return NO_INFORMATION_REPLY;

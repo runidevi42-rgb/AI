@@ -14,7 +14,7 @@
     "build": "npm run build:server && npm run build:client",
     "start": "node dist-server/server/index.js",
     "test": "vitest run",
-    "lint": "eslint .",
+    "lint": "eslint server src --no-warn-ignored",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.server.json --noEmit"
   },
   "dependencies": {
