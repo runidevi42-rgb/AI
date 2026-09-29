@@ -182,12 +182,22 @@ export async function fetchCompleteStructuredAnswer(student: StudentProfile, int
   if (intent === 'TIMETABLE') {
     const day = new Intl.DateTimeFormat('en-US', { weekday: 'long', timeZone: config.COLLEGE_TIMEZONE }).format(now);
     const nextClass = /next class|which class.*next|agla class/.test(q);
-    let queryBuilder = supabase.from('timetables').select('day_of_week,start_time,end_time,subject,room').match(scope).order('day_of_week').order('start_time');
+    // The deployed timetable table is intentionally read with `*` because existing
+    // installations use different optional columns (for example, some have `room`
+    // while the current table has `teacher`, `batch_group`, and `is_recess`). This
+    // keeps the chatbot compatible with the real schema without inventing columns.
+    let queryBuilder = supabase.from('timetables').select('*').order('day_of_week').order('start_time');
     if (!full && !nextClass && /today|aaj|schedule/.test(q)) queryBuilder = queryBuilder.ilike('day_of_week', day);
-    const result = await queryBuilder.limit(50);
+    const result = await queryBuilder.limit(100);
     if (isMissingRelation(result.error)) return NO_INFORMATION_REPLY;
     if (result.error) throw result.error;
-    let rows = result.data ?? [];
+    let rows = (result.data ?? []).filter((row: any) => {
+      // If a deployment has scope columns, apply them. The current live table does
+      // not, so its shared timetable remains usable instead of failing the request.
+      if (row.department && student.department && String(row.department).toLowerCase() !== String(student.department).toLowerCase()) return false;
+      if (row.semester != null && student.semester != null && Number(row.semester) !== Number(student.semester)) return false;
+      return !row.is_recess && !/^recess|no class$/i.test(String(row.subject || '').trim());
+    });
     if (!rows.length) return NO_INFORMATION_REPLY;
     if (nextClass) {
       const week = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
