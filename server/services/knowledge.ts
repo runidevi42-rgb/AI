@@ -181,13 +181,27 @@ export async function fetchCompleteStructuredAnswer(student: StudentProfile, int
   }
   if (intent === 'TIMETABLE') {
     const day = new Intl.DateTimeFormat('en-US', { weekday: 'long', timeZone: config.COLLEGE_TIMEZONE }).format(now);
+    const nextClass = /next class|which class.*next|agla class/.test(q);
     let queryBuilder = supabase.from('timetables').select('day_of_week,start_time,end_time,subject,room').match(scope).order('day_of_week').order('start_time');
-    if (!full && /today|aaj|next class|schedule/.test(q)) queryBuilder = queryBuilder.ilike('day_of_week', day);
-    const result = await queryBuilder.limit(!full && /next class/.test(q) ? 1 : 50);
+    if (!full && !nextClass && /today|aaj|schedule/.test(q)) queryBuilder = queryBuilder.ilike('day_of_week', day);
+    const result = await queryBuilder.limit(50);
     if (isMissingRelation(result.error)) return NO_INFORMATION_REPLY;
     if (result.error) throw result.error;
-    const rows = result.data ?? [];
+    let rows = result.data ?? [];
     if (!rows.length) return NO_INFORMATION_REPLY;
+    if (nextClass) {
+      const week = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+      const todayIndex = week.indexOf(day);
+      const currentTime = now.toTimeString().slice(0, 8);
+      rows = [...rows].sort((a, b) => {
+        const dayDelta = ((week.indexOf(a.day_of_week) - todayIndex + 7) % 7) - ((week.indexOf(b.day_of_week) - todayIndex + 7) % 7);
+        if (dayDelta !== 0) return dayDelta;
+        return String(a.start_time).localeCompare(String(b.start_time));
+      });
+      const todayRows = rows.filter((row) => row.day_of_week === day && String(row.start_time) >= currentTime);
+      rows = (todayRows.length ? todayRows : rows).slice(0, 1);
+    }
+    if (nextClass) return `Your next class is:\n${rows.map((row) => `- ${row.day_of_week}: ${row.subject} ${displayTime(row.start_time)}-${displayTime(row.end_time)}${row.room ? ` (${row.room})` : ''}`).join('\n')}`;
     return `${full ? 'Your complete timetable is:' : `Your classes on ${day} are:`}\n` + rows.map((row) => `- ${row.day_of_week}: ${row.subject} ${displayTime(row.start_time)}-${displayTime(row.end_time)}${row.room ? ` (${row.room})` : ''}`).join('\n');
   }
   if (intent === 'ASSIGNMENT') {
