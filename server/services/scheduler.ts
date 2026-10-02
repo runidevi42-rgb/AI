@@ -7,7 +7,7 @@ import { dispatchNotification } from './notifications.js';
 import { resolveTemplate, type WhatsAppTemplateKind } from './templates.js';
 import { sendTemplate } from './whatsapp.js';
 import { collegeDateBounds, formatCollegeTime } from '../utils/college-time.js';
-import { timetableRowsForStudent } from './knowledge.js';
+import { getTodayTimetable } from './knowledge.js';
 
 type DateParts = { date: string; day: string };
 type ReminderStudent = { student_id: number; full_name?: string; whatsapp_number: string };
@@ -65,14 +65,12 @@ async function sendReminderBatch(students: ReminderStudent[], kind: WhatsAppTemp
 }
 
 async function dailySchedules() {
-  const { date, day } = collegeDateParts();
+  const { date } = collegeDateParts();
   await runScheduledOnce(`daily-schedule:${date}`, async () => {
     const { data: students, error } = await supabase.from('students').select('student_id,full_name,whatsapp_number,department,semester').match({ active: true, whatsapp_opt_in: true });
     if (error) throw error;
     for (const student of students ?? []) {
-      const { data: timetable, error: classError } = await supabase.from('timetables').select('*').ilike('day_of_week', day).order('start_time');
-      if (classError) throw classError;
-      const classes = timetableRowsForStudent(timetable ?? [], { ...student, course: '', roll_number: 0 } as any);
+      const classes = await getTodayTimetable({ ...student, course: '', roll_number: 0 } as any);
       if (!classes?.length) continue;
       const schedule = classes.map((item) => `${formatCollegeTime(item.start_time)} - ${item.subject}${item.room ? ` (${item.room})` : ' (To be announced)'}`).join('\n');
       await sendReminderBatch([student], 'timetable', (recipient) => [recipient.full_name?.split(' ')[0] ?? 'Student', displayDate(date), schedule]);

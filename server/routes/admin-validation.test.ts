@@ -1,7 +1,22 @@
 import { describe, expect, it } from 'vitest';
-import { validatedPayload } from './admin-validation.js';
+import { timetableSchema, validatedPayload } from './admin-validation.js';
 
 describe('admin resource validation', () => {
+  it('normalizes a regular timetable entry', () => {
+    expect(timetableSchema.parse({ day_of_week: 'Monday', start_time: '09:00', end_time: '10:00', subject: 'DBMS', teacher: 'Dr. Rao', batch_group: 'CSE-5', is_recess: false })).toEqual({
+      day_of_week: 'Monday', start_time: '09:00', end_time: '10:00', subject: 'DBMS', teacher: 'Dr. Rao', batch_group: 'CSE-5', is_recess: false,
+    });
+  });
+
+  it('allows recess without subject or teacher and labels it Recess', () => {
+    expect(timetableSchema.parse({ day_of_week: 'Monday', start_time: '13:00', end_time: '14:00', is_recess: true })).toMatchObject({ subject: 'Recess', teacher: null, is_recess: true });
+  });
+
+  it('rejects invalid timetable ranges and incomplete classes', () => {
+    expect(() => timetableSchema.parse({ day_of_week: 'Monday', start_time: '10:00', end_time: '09:00', subject: 'DBMS', teacher: 'Dr. Rao' })).toThrow();
+    expect(() => timetableSchema.parse({ day_of_week: 'Monday', start_time: '09:00', end_time: '10:00', subject: 'DBMS' })).toThrow();
+  });
+
   it('normalizes a valid attendance record', () => {
     expect(validatedPayload('attendance', {
       student_id: '101', subject: 'Mathematics', attendance_date: '2026-08-21', status: 'present', ignored: true,

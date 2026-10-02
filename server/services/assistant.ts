@@ -95,10 +95,25 @@ export async function answerStudentProfile(student: StudentProfile, message: str
     const previous = await supabase.from('message_logs').select('message,metadata').eq('student_id', student.student_id).eq('channel', channel === 'web' ? 'web_push' : channel).eq('metadata->>session_id', sessionId).eq('direction', 'inbound').order('created_at', { ascending: false }).limit(1).maybeSingle();
     if (previous.data?.message) dataQuery = `${previous.data.message} ${message}`;
     const priorIntent = previous.data?.metadata && typeof previous.data.metadata === 'object' && 'intent' in previous.data.metadata ? String((previous.data.metadata as Record<string, unknown>).intent) : '';
-    if (['ATTENDANCE', 'TIMETABLE', 'ASSIGNMENT', 'EXAM', 'NOTICE', 'EMERGENCY_CONTACT'].includes(priorIntent)) intent = priorIntent as ChatbotIntent;
+    if (['ATTENDANCE', 'TIMETABLE', 'ASSIGNMENT', 'EXAM', 'NOTICE', 'EMERGENCY_CONTACT', 'FACULTY_CONTACT'].includes(priorIntent)) intent = priorIntent as ChatbotIntent;
   }
   if (intent === 'GREETING') {
     const text = `Hello ${student.full_name} 👋\nWelcome to the College AI Assistant. How can I help you today?`;
+    await logConversation(phone, student.student_id, message, text, intent, sessionId, channel, messageId);
+    return { authenticated: true, text, studentId: student.student_id, intent };
+  }
+  if (intent === 'THANKS') {
+    const text = 'You\'re welcome! 😊';
+    await logConversation(phone, student.student_id, message, text, intent, sessionId, channel, messageId);
+    return { authenticated: true, text, studentId: student.student_id, intent };
+  }
+  if (intent === 'GOODBYE') {
+    const text = 'Goodbye! 👋 Have a great day.';
+    await logConversation(phone, student.student_id, message, text, intent, sessionId, channel, messageId);
+    return { authenticated: true, text, studentId: student.student_id, intent };
+  }
+  if (intent === 'TIMETABLE' && /don'?t understand|do not understand|confused|samajh nahi/.test(message.toLowerCase())) {
+    const text = 'No problem! I can help. Would you like to see your next class or today\'s timetable?';
     await logConversation(phone, student.student_id, message, text, intent, sessionId, channel, messageId);
     return { authenticated: true, text, studentId: student.student_id, intent };
   }
@@ -112,9 +127,9 @@ export async function answerStudentProfile(student: StudentProfile, message: str
       return { authenticated: true, text: DB_FAILURE_REPLY, studentId: student.student_id, intent };
     }
   }
-  if (['ATTENDANCE', 'TIMETABLE', 'ASSIGNMENT', 'EXAM', 'NOTICE', 'EMERGENCY_CONTACT'].includes(intent)) {
+  if (['ATTENDANCE', 'TIMETABLE', 'ASSIGNMENT', 'EXAM', 'NOTICE', 'EMERGENCY_CONTACT', 'FACULTY_CONTACT'].includes(intent)) {
     try {
-      const text = await fetchCompleteStructuredAnswer(student, intent as 'ATTENDANCE' | 'TIMETABLE' | 'ASSIGNMENT' | 'EXAM' | 'NOTICE' | 'EMERGENCY_CONTACT', dataQuery);
+      const text = await fetchCompleteStructuredAnswer(student, intent as 'ATTENDANCE' | 'TIMETABLE' | 'ASSIGNMENT' | 'EXAM' | 'NOTICE' | 'EMERGENCY_CONTACT' | 'FACULTY_CONTACT', dataQuery);
       await logConversation(phone, student.student_id, message, text, intent, sessionId, channel, messageId);
       return { authenticated: true, text, studentId: student.student_id, intent };
     } catch (error) {

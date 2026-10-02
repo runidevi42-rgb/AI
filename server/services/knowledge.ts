@@ -15,6 +15,8 @@ export interface StudentProfile {
   department: string;
   course: string;
   semester: number;
+  section?: string | null;
+  batch_group?: string | null;
 }
 
 export const UNREGISTERED_REPLY = 'Your WhatsApp number is not registered with the college. Please contact the college administration.';
@@ -74,11 +76,10 @@ export async function findStudent(phone: string) {
     ? [normalizedPhone, normalizedPhone.slice(2)]
     : [normalizedPhone];
 
-  const { data, error } = await supabase
-    .from('students')
-    .select('student_id,full_name,whatsapp_number,roll_number,department,course,semester')
-    .in('whatsapp_number', lookupPhones)
-    .maybeSingle();
+  const baseSelect = 'student_id,full_name,whatsapp_number,roll_number,department,course,semester';
+  let result = await supabase.from('students').select(`${baseSelect},section,batch_group`).in('whatsapp_number', lookupPhones).maybeSingle();
+  if (result.error?.code === '42703') result = await supabase.from('students').select(baseSelect).in('whatsapp_number', lookupPhones).maybeSingle();
+  const { data, error } = result;
 
   if (error) {
     logger.error({
@@ -101,9 +102,10 @@ export async function findStudent(phone: string) {
 }
 
 export async function findStudentById(studentId: number) {
-  const { data, error } = await supabase.from('students')
-    .select('student_id,full_name,whatsapp_number,roll_number,department,course,semester')
-    .eq('student_id', studentId).maybeSingle();
+  const baseSelect = 'student_id,full_name,whatsapp_number,roll_number,department,course,semester';
+  let result = await supabase.from('students').select(`${baseSelect},section,batch_group`).eq('student_id', studentId).maybeSingle();
+  if (result.error?.code === '42703') result = await supabase.from('students').select(baseSelect).eq('student_id', studentId).maybeSingle();
+  const { data, error } = result;
   if (error) throw error;
   return data as StudentProfile | null;
 }
@@ -131,12 +133,30 @@ export function timetableRowsForStudent(rows: any[], student: StudentProfile) {
   });
 }
 
+async function queryTimetableRows(student: StudentProfile, day?: string) {
+  const run = async (table: 'timetables' | 'timetable') => {
+    let query = supabase.from(table).select('*').order('day_of_week').order('start_time');
+    if (day) query = query.ilike('day_of_week', day);
+    return query.limit(200);
+  };
+  let result = await run('timetables');
+  if (isMissingRelation(result.error)) result = await run('timetable');
+  if (isMissingRelation(result.error)) return [];
+  if (result.error) throw result.error;
+  return timetableRowsForStudent(result.data ?? [], student);
+}
+
+export async function getTodayTimetable(student: StudentProfile, now = new Date()) {
+  return queryTimetableRows(student, getCurrentCollegeDateTime(now).weekday);
+}
+
+export async function getStudentTimetable(student: StudentProfile) {
+  return queryTimetableRows(student);
+}
+
 export async function getNextClass(student: StudentProfile, now = new Date()) {
   const collegeNow = getCurrentCollegeDateTime(now);
-  const result = await supabase.from('timetables').select('*').ilike('day_of_week', collegeNow.weekday).order('start_time').limit(100);
-  if (isMissingRelation(result.error)) return null;
-  if (result.error) throw result.error;
-  const rows = timetableRowsForStudent(result.data ?? [], student);
+  const rows = await getTodayTimetable(student, now);
   const currentMinutes = collegeNow.hour * 60 + collegeNow.minute;
   const selected = rows.filter((row) => (timeToMinutes(row.start_time) ?? -1) > currentMinutes)
     .sort((a, b) => (timeToMinutes(a.start_time) ?? 0) - (timeToMinutes(b.start_time) ?? 0));
@@ -151,6 +171,37 @@ export async function getNextClass(student: StudentProfile, now = new Date()) {
     selectedRecords: selected.map((row) => ({ day: row.day_of_week, start: row.start_time, end: row.end_time, subject: row.subject, room: row.room ?? null })),
   }, 'Next timetable record selected');
   return selected[0] ?? null;
+}
+
+export async function getCurrentClass(student: StudentProfile, now = new Date()) {
+  const collegeNow = getCurrentCollegeDateTime(now);
+  const currentMinutes = collegeNow.hour * 60 + collegeNow.minute;
+  return (await getTodayTimetable(student, now)).find((row) => {
+    const start = timeToMinutes(row.start_time);
+    const end = timeToMinutes(row.end_time);
+    return start !== null && end !== null && start <= currentMinutes && currentMinutes < end;
+  }) ?? null;
+}
+
+export async function getSubjectTimetable(student: StudentProfile, subject: string) {
+  const normalized = subject.trim().toLowerCase();
+  return (await queryTimetableRows(student)).filter((row) => String(row.subject || '').toLowerCase().includes(normalized));
+}
+
+async function getAttendancePercentage(studentId: number) {
+  const direct = await supabase.from('student_attendance_summary').select('student_id,attendance_percentage').eq('student_id', studentId).maybeSingle();
+  if (!isMissingRelation(direct.error)) {
+    if (direct.error) throw direct.error;
+    return direct.data?.attendance_percentage == null ? null : Number(direct.data.attendance_percentage);
+  }
+  const legacy = await supabase.from('attendance_summary').select('*').eq('student_id', studentId);
+  if (legacy.error) throw legacy.error;
+  const rows = legacy.data ?? [];
+  if (!rows.length) return null;
+  const directLegacy = rows.find((row: any) => row.attendance_percentage != null);
+  if (directLegacy) return Number(directLegacy.attendance_percentage);
+  const totals = rows.reduce((a, row: any) => ({ present: a.present + Number(row.present_classes || 0), total: a.total + Number(row.total_classes || 0) }), { present: 0, total: 0 });
+  return totals.total ? Math.round(totals.present / totals.total * 100) : null;
 }
 
 export async function fetchStructuredAnswer(student: StudentProfile, intent: 'ATTENDANCE' | 'TIMETABLE' | 'ASSIGNMENT' | 'EXAM' | 'NOTICE' | 'EMERGENCY_CONTACT', _query = '') {
@@ -203,7 +254,7 @@ function isMissingRelation(error: { code?: string } | null | undefined) {
   return error?.code === 'PGRST205' || error?.code === '42P01';
 }
 
-export async function fetchCompleteStructuredAnswer(student: StudentProfile, intent: 'ATTENDANCE' | 'TIMETABLE' | 'ASSIGNMENT' | 'EXAM' | 'NOTICE' | 'EMERGENCY_CONTACT', query = '') {
+export async function fetchCompleteStructuredAnswer(student: StudentProfile, intent: 'ATTENDANCE' | 'TIMETABLE' | 'ASSIGNMENT' | 'EXAM' | 'NOTICE' | 'EMERGENCY_CONTACT' | 'FACULTY_CONTACT', query = '') {
   const q = query.toLowerCase();
   const now = new Date();
   const collegeNow = getCurrentCollegeDateTime(now);
@@ -211,36 +262,44 @@ export async function fetchCompleteStructuredAnswer(student: StudentProfile, int
   const scope = { department: student.department, semester: student.semester };
   const full = /\b(full|all|complete|entire|subject wise|subject-wise)\b/.test(q);
   if (intent === 'ATTENDANCE') {
-    const result = await supabase.from('attendance_summary').select('subject,total_classes,present_classes,percentage').eq('student_id', student.student_id).order('subject');
-    if (result.error) throw result.error;
-    const rows = result.data ?? [];
-    if (!rows.length) return NO_INFORMATION_REPLY;
-    const lowest = /lowest|low|kam/.test(q);
-    const ordered = lowest ? [...rows].sort((a, b) => Number(a.percentage) - Number(b.percentage)) : rows;
-    if (lowest) return `Your lowest attendance is ${ordered[0].subject}: ${ordered[0].percentage}%.`;
-    const totals = rows.reduce((a, row) => ({ present: a.present + Number(row.present_classes || 0), total: a.total + Number(row.total_classes || 0) }), { present: 0, total: 0 });
-    const overall = totals.total ? Math.round(totals.present / totals.total * 1000) / 10 : 0;
-    return `Your current attendance is ${overall}%.\n` + ordered.map((row) => `- ${row.subject}: ${row.percentage}% (${row.present_classes}/${row.total_classes} classes)`).join('\n');
+    const attendance = await getAttendancePercentage(student.student_id);
+    return attendance === null ? NO_INFORMATION_REPLY : `Your current attendance is ${attendance}%.`;
   }
   if (intent === 'TIMETABLE') {
     const day = collegeNow.weekday;
     const nextClass = /next class|next lecture|next period|what do i have next|which class.*next|after this class|agla class|meri next class|aaj next class/.test(q);
+    const currentClass = /what class.*(now|currently)|which class.*(now|currently)|current class|class.*abhi|abhi.*class/.test(q);
+    if (currentClass) {
+      const row = await getCurrentClass(student, now);
+      return row ? `Your current class is ${row.subject} until ${displayTime(row.end_time)}${row.room ? ` in ${row.room}` : ''}.` : 'There is no class happening right now.';
+    }
     if (nextClass) {
       const row = await getNextClass(student, now);
       if (!row) return NO_CLASSES_TODAY_REPLY;
       const room = row.room ? ` in ${row.room}` : /\b(room|where)\b/.test(q) ? ' (room information is not available)' : '';
       return `Your next class is ${row.subject} at ${displayTime(row.start_time)}${room}.`;
     }
+    const asksSubject = /\b(when|what).*(class|lecture|period)\b/.test(q) && !/\b(today|aaj|schedule|timetable)\b/.test(q);
+    if (asksSubject) {
+      const allRows = await queryTimetableRows(student);
+      const subject = [...new Set(allRows.map((row) => String(row.subject || '').trim()).filter(Boolean))]
+        .sort((a, b) => b.length - a.length)
+        .find((value) => q.includes(value.toLowerCase()));
+      if (subject) {
+        const rows = await getSubjectTimetable(student, subject);
+        return rows.length
+          ? `${subject} timetable:\n${rows.map((row) => `- ${row.day_of_week}: ${displayTime(row.start_time)}-${displayTime(row.end_time)}${row.room ? ` (${row.room})` : ''}`).join('\n')}`
+          : NO_INFORMATION_REPLY;
+      }
+      return NO_INFORMATION_REPLY;
+    }
     // The deployed timetable table is intentionally read with `*` because existing
     // installations use different optional columns (for example, some have `room`
     // while the current table has `teacher`, `batch_group`, and `is_recess`). This
     // keeps the chatbot compatible with the real schema without inventing columns.
-    let queryBuilder = supabase.from('timetables').select('*').order('day_of_week').order('start_time');
-    if (!full && /today|aaj|schedule/.test(q)) queryBuilder = queryBuilder.ilike('day_of_week', day);
-    const result = await queryBuilder.limit(100);
-    if (isMissingRelation(result.error)) return NO_INFORMATION_REPLY;
-    if (result.error) throw result.error;
-    const rows = timetableRowsForStudent(result.data ?? [], student);
+    const rows = !full && /today|aaj|schedule/.test(q)
+      ? await getTodayTimetable(student, now)
+      : await queryTimetableRows(student);
     if (config.NODE_ENV === 'development') logger.info({
       studentId: student.student_id,
       department: student.department,
@@ -276,9 +335,27 @@ export async function fetchCompleteStructuredAnswer(student: StudentProfile, int
     const rows = result.data ?? [];
     return rows.length ? rows.map((row) => `- ${row.title} [${row.priority}]\n${row.content}`).join('\n') : NO_INFORMATION_REPLY;
   }
+  if (intent === 'FACULTY_CONTACT') {
+    const result = await supabase.from('faculty').select('*').eq('active', true).limit(100);
+    if (isMissingRelation(result.error)) return 'I don\'t have a faculty contact for that subject yet.';
+    if (result.error) throw result.error;
+    const rows = result.data ?? [];
+    if (!rows.length) return 'I don\'t have a faculty contact for that subject yet.';
+    const subject = rows.flatMap((row: any) => {
+      const values = Array.isArray(row.subjects) ? row.subjects : [row.subjects];
+      return values.filter(Boolean).map((value: unknown) => String(value));
+    }).sort((a, b) => b.length - a.length).find((value) => q.includes(value.toLowerCase()));
+    const matching = subject
+      ? rows.filter((row: any) => String(Array.isArray(row.subjects) ? row.subjects.join(' ') : row.subjects || '').toLowerCase().includes(subject.toLowerCase()))
+      : rows.filter((row: any) => !row.department || row.department.toLowerCase() === student.department.toLowerCase() || row.department.toLowerCase() === 'general');
+    if (!matching.length) return 'I don\'t have a faculty contact for that subject yet.';
+    return matching.map((row: any) => `- ${row.full_name || row.faculty_name}${row.designation ? ` (${row.designation})` : ''}${row.email ? `\n  Email: ${row.email}` : ''}${row.phone ? `\n  Phone: ${row.phone}` : ''}${row.office_room || row.office ? `\n  Office: ${row.office_room || row.office}` : ''}`).join('\n');
+  }
   const result = await supabase.from('emergency_contacts').select('contact_name,phone_number,role_or_service,emergency_type,description,priority,contact_type').eq('active', true).order('priority').limit(50);
   if (result.error) throw result.error;
-  const rows = result.data ?? [];
+  const allRows = result.data ?? [];
+  const specific = /\b(ambulance|police|fire|security|ragging)\b/.test(q);
+  const rows = specific ? allRows.filter((row) => `${row.contact_name} ${row.role_or_service} ${row.emergency_type}`.toLowerCase().includes(q.match(/ambulance|police|fire|security|ragging/)?.[0] ?? '')) : allRows;
   return rows.length ? rows.map((row) => `- ${row.contact_name}: ${row.phone_number} (${row.role_or_service})${row.description ? `\n  ${row.description}` : ''}`).join('\n') : NO_INFORMATION_REPLY;
 }
 

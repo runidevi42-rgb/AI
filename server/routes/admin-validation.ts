@@ -74,6 +74,25 @@ const emergencyContactSchema = z.object({
   contact_type: z.enum(['faculty', 'public_service']),
 });
 
+export const timetableSchema = z.object({
+  day_of_week: z.enum(['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']),
+  start_time: z.string().regex(/^\d{2}:\d{2}(:\d{2})?$/, 'Enter a valid start time'),
+  end_time: z.string().regex(/^\d{2}:\d{2}(:\d{2})?$/, 'Enter a valid end time'),
+  subject: z.string().trim().optional().default(''),
+  teacher: z.string().trim().nullable().optional(),
+  batch_group: z.string().trim().nullable().optional(),
+  is_recess: z.boolean().default(false),
+}).superRefine((value, context) => {
+  if (value.end_time <= value.start_time) context.addIssue({ code: 'custom', path: ['end_time'], message: 'End time must be after start time' });
+  if (!value.is_recess && !value.subject.trim()) context.addIssue({ code: 'custom', path: ['subject'], message: 'Subject is required unless this is a recess' });
+  if (!value.is_recess && !value.teacher?.trim()) context.addIssue({ code: 'custom', path: ['teacher'], message: 'Teacher is required unless this is a recess' });
+}).transform((value) => ({
+  ...value,
+  subject: value.is_recess ? 'Recess' : value.subject.trim(),
+  teacher: value.is_recess ? null : (value.teacher?.trim() || null),
+  batch_group: value.batch_group?.trim() || null,
+}));
+
 export function validatedPayload(table: string, body: Record<string, unknown>): Record<string, unknown> {
   if (table === 'assignments') return assignmentSchema.parse(body);
   if (table === 'exams') return examSchema.parse(body);

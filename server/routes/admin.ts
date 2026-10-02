@@ -6,7 +6,7 @@ import { logger } from '../lib/logger.js';
 import { supabase } from '../lib/supabase.js';
 import { requireAdmin } from '../middleware/auth.js';
 import { dispatchNotification, notifyTimetableChange } from '../services/notifications.js';
-import { validatedPayload } from './admin-validation.js';
+import { timetableSchema, validatedPayload } from './admin-validation.js';
 
 export const adminRouter = Router();
 adminRouter.use(requireAdmin);
@@ -63,6 +63,55 @@ adminRouter.get('/dashboard', asyncHandler(async (_req, res) => {
   const sentLogs = logs.data ?? [];
   const delivered = sentLogs.filter((l) => ['sent', 'delivered', 'read'].includes(l.status)).length;
   res.json({ students: students.count ?? 0, activeAssignments: assignments.count ?? 0, upcomingExams: exams.count ?? 0, unreadNotices: notices.count ?? 0, deliveryRate: sentLogs.length ? Math.round(delivered / sentLogs.length * 100) : 100, recentActivity: activity.data ?? [] });
+}));
+
+const timetableColumns = 'id,day_of_week,start_time,end_time,subject,teacher,batch_group,is_recess';
+const timetableTime = (value: string) => value.length === 5 ? `${value}:00` : value;
+
+adminRouter.get('/timetables', asyncHandler(async (req, res) => {
+  const search = String(req.query.search ?? '').trim();
+  const day = String(req.query.day ?? '').trim();
+  const batch = String(req.query.batch_group ?? '').trim();
+  let query = supabase.from('timetables').select(timetableColumns, { count: 'exact' });
+  if (day) query = query.eq('day_of_week', day);
+  if (batch) query = query.eq('batch_group', batch);
+  if (search) query = query.or(`subject.ilike.%${search.replace(/[%(),]/g, '')}%,teacher.ilike.%${search.replace(/[%(),]/g, '')}%,batch_group.ilike.%${search.replace(/[%(),]/g, '')}%`);
+  const { data, error, count } = await query.order('day_of_week').order('start_time');
+  if (error) throw new AppError(500, 'Unable to load timetables');
+  res.json({ data: data ?? [], total: count ?? 0, page: 1, pageSize: data?.length ?? 0 });
+}));
+
+async function ensureTimetableNoConflict(payload: Record<string, unknown>, id?: string) {
+  const batch = payload.batch_group as string | null;
+  if (!batch) return;
+  let query = supabase.from('timetables').select('id,subject,start_time,end_time').eq('day_of_week', payload.day_of_week).eq('batch_group', batch)
+    .lt('start_time', timetableTime(String(payload.end_time))).gt('end_time', timetableTime(String(payload.start_time)));
+  if (id) query = query.neq('id', id);
+  const { data, error } = await query.limit(1);
+  if (error) throw new AppError(400, 'Unable to check timetable conflicts');
+  if (data?.length) throw new AppError(409, `This entry overlaps with ${data[0].subject || 'another class'} for batch ${batch}.`);
+}
+
+adminRouter.post('/timetables', asyncHandler(async (req, res) => {
+  const payload = timetableSchema.parse(req.body);
+  await ensureTimetableNoConflict(payload);
+  const { data, error } = await supabase.from('timetables').insert(payload).select(timetableColumns).single();
+  if (error) throw new AppError(400, error.message);
+  res.status(201).json(data);
+}));
+
+adminRouter.put('/timetables/:id', asyncHandler(async (req, res) => {
+  const payload = timetableSchema.parse(req.body);
+  await ensureTimetableNoConflict(payload, String(req.params.id));
+  const { data, error } = await supabase.from('timetables').update(payload).eq('id', req.params.id).select(timetableColumns).single();
+  if (error) throw new AppError(400, error.message);
+  res.json(data);
+}));
+
+adminRouter.delete('/timetables/:id', asyncHandler(async (req, res) => {
+  const { error } = await supabase.from('timetables').delete().eq('id', req.params.id);
+  if (error) throw new AppError(400, error.message);
+  res.sendStatus(204);
 }));
 
 adminRouter.get('/:resource', asyncHandler(async (req, res) => {
