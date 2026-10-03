@@ -1,6 +1,6 @@
 export type ChatbotIntent =
   | 'GREETING' | 'THANKS' | 'GOODBYE' | 'ATTENDANCE' | 'TIMETABLE' | 'ASSIGNMENT' | 'EXAM'
-  | 'NOTICE' | 'EMERGENCY_CONTACT' | 'FACULTY_CONTACT' | 'GENERAL_COLLEGE' | 'STUDY_AI' | 'UNKNOWN';
+  | 'LUNCH_BREAK' | 'NOTICE' | 'EMERGENCY_CONTACT' | 'FACULTY_CONTACT' | 'GENERAL_COLLEGE' | 'STUDY_AI' | 'UNKNOWN';
 
 export function detectChatbotIntent(input: string): ChatbotIntent {
   const q = input.toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9\s?]/g, ' ');
@@ -8,6 +8,7 @@ export function detectChatbotIntent(input: string): ChatbotIntent {
   if (/\b(thanks|thank you|thx|dhanyavaad|shukriya)\b/.test(q)) return 'THANKS';
   if (/\b(bye|goodbye|see you|see ya|phir milenge)\b/.test(q)) return 'GOODBYE';
   if (/\b(attendance|present|absent|percentage|meri attendance|meri hazri|kitni attendance)\b/.test(q)) return 'ATTENDANCE';
+  if (/\b(lunch|lunchtime|lunch time|break time|recess|meal break|khane ka time|khana kab)\b/.test(q)) return 'LUNCH_BREAK';
   if (/\b(next class|next lecture|next period|what do i have next|which class.*next|after this class|agla class|next\s+class|next\s+lecture|next\s+period|timetable|time table|class|classes|lecture|schedule|aaj.*(class|timetable|schedule)|mera timetable|meri next class|aaj next class)\b/.test(q)) return 'TIMETABLE';
   if (/\b(assignment|homework|submission|deadline|pending.*assignment|koi assignment)\b/.test(q)) return 'ASSIGNMENT';
   if (/\b(exam|examination|test|assessment|hall ticket|next exam|mera exam|exam kab)\b/.test(q)) return 'EXAM';

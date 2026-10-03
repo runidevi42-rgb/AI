@@ -112,7 +112,7 @@ export async function findStudentById(studentId: number) {
 
 function displayTime(value: string | null | undefined) { return formatCollegeTime(value); }
 
-export function timetableRowsForStudent(rows: any[], student: StudentProfile) {
+export function timetableRowsForStudent(rows: any[], student: StudentProfile, includeBreaks = false) {
   const studentGroup = (student as StudentProfile & { batch_group?: string; batch?: string; section?: string });
   const group = studentGroup.batch_group || studentGroup.batch || studentGroup.section;
   const seen = new Set<string>();
@@ -124,7 +124,7 @@ export function timetableRowsForStudent(rows: any[], student: StudentProfile) {
     // A batch-specific record is not safe to show until the authenticated student
     // has a matching group in the students table. Never guess a section from roll no.
     if (rowGroup && (!group || String(rowGroup).toLowerCase() !== String(group).toLowerCase())) return false;
-    if (row.is_recess || /^recess|no class$/i.test(String(row.subject || '').trim())) return false;
+    if (!includeBreaks && (row.is_recess || /^recess|no class$/i.test(String(row.subject || '').trim()))) return false;
     if (timeToMinutes(row.start_time) === null || timeToMinutes(row.end_time) === null) return false;
     const key = [row.day_of_week, row.start_time, row.end_time, row.subject, row.teacher, row.room, row.batch_group].map(String).join('|');
     if (seen.has(key)) return false;
@@ -133,7 +133,7 @@ export function timetableRowsForStudent(rows: any[], student: StudentProfile) {
   });
 }
 
-async function queryTimetableRows(student: StudentProfile, day?: string) {
+async function queryTimetableRows(student: StudentProfile, day?: string, includeBreaks = false) {
   const run = async (table: 'timetables' | 'timetable') => {
     let query = supabase.from(table).select('*').order('day_of_week').order('start_time');
     if (day) query = query.ilike('day_of_week', day);
@@ -143,7 +143,7 @@ async function queryTimetableRows(student: StudentProfile, day?: string) {
   if (isMissingRelation(result.error)) result = await run('timetable');
   if (isMissingRelation(result.error)) return [];
   if (result.error) throw result.error;
-  return timetableRowsForStudent(result.data ?? [], student);
+  return timetableRowsForStudent(result.data ?? [], student, includeBreaks);
 }
 
 export async function getTodayTimetable(student: StudentProfile, now = new Date()) {
@@ -186,6 +186,10 @@ export async function getCurrentClass(student: StudentProfile, now = new Date())
 export async function getSubjectTimetable(student: StudentProfile, subject: string) {
   const normalized = subject.trim().toLowerCase();
   return (await queryTimetableRows(student)).filter((row) => String(row.subject || '').toLowerCase().includes(normalized));
+}
+
+export async function getBreakTimetable(student: StudentProfile) {
+  return (await queryTimetableRows(student, undefined, true)).filter((row) => row.is_recess || /^recess|break$/i.test(String(row.subject || '').trim()));
 }
 
 async function getAttendancePercentage(studentId: number) {
@@ -254,7 +258,7 @@ function isMissingRelation(error: { code?: string } | null | undefined) {
   return error?.code === 'PGRST205' || error?.code === '42P01';
 }
 
-export async function fetchCompleteStructuredAnswer(student: StudentProfile, intent: 'ATTENDANCE' | 'TIMETABLE' | 'ASSIGNMENT' | 'EXAM' | 'NOTICE' | 'EMERGENCY_CONTACT' | 'FACULTY_CONTACT', query = '') {
+export async function fetchCompleteStructuredAnswer(student: StudentProfile, intent: 'ATTENDANCE' | 'TIMETABLE' | 'LUNCH_BREAK' | 'ASSIGNMENT' | 'EXAM' | 'NOTICE' | 'EMERGENCY_CONTACT' | 'FACULTY_CONTACT', query = '') {
   const q = query.toLowerCase();
   const now = new Date();
   const collegeNow = getCurrentCollegeDateTime(now);
@@ -264,6 +268,12 @@ export async function fetchCompleteStructuredAnswer(student: StudentProfile, int
   if (intent === 'ATTENDANCE') {
     const attendance = await getAttendancePercentage(student.student_id);
     return attendance === null ? NO_INFORMATION_REPLY : `Your current attendance is ${attendance}%.`;
+  }
+  if (intent === 'LUNCH_BREAK') {
+    const breaks = await getBreakTimetable(student);
+    return breaks.length
+      ? breaks.map((row) => `Lunch/recess is on ${row.day_of_week} from ${displayTime(row.start_time)} to ${displayTime(row.end_time)}.`).join('\n')
+      : NO_INFORMATION_REPLY;
   }
   if (intent === 'TIMETABLE') {
     const day = collegeNow.weekday;
