@@ -188,8 +188,13 @@ export async function getSubjectTimetable(student: StudentProfile, subject: stri
   return (await queryTimetableRows(student)).filter((row) => String(row.subject || '').toLowerCase().includes(normalized));
 }
 
-export async function getBreakTimetable(student: StudentProfile) {
-  return (await queryTimetableRows(student, undefined, true)).filter((row) => row.is_recess || /^recess|break$/i.test(String(row.subject || '').trim()));
+export async function getBreakTimetable(student: StudentProfile, day?: string) {
+  return (await queryTimetableRows(student, day, true)).filter((row) => row.is_recess || /^recess|break$/i.test(String(row.subject || '').trim()));
+}
+
+function requestedWeekday(query: string) {
+  const match = query.match(/\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/i);
+  return match ? match[1] : undefined;
 }
 
 async function getAttendancePercentage(studentId: number) {
@@ -270,7 +275,8 @@ export async function fetchCompleteStructuredAnswer(student: StudentProfile, int
     return attendance === null ? NO_INFORMATION_REPLY : `Your current attendance is ${attendance}%.`;
   }
   if (intent === 'LUNCH_BREAK') {
-    const breaks = await getBreakTimetable(student);
+    const requestedDay = requestedWeekday(q);
+    const breaks = await getBreakTimetable(student, requestedDay);
     return breaks.length
       ? breaks.map((row) => `Lunch/recess is on ${row.day_of_week} from ${displayTime(row.start_time)} to ${displayTime(row.end_time)}.`).join('\n')
       : NO_INFORMATION_REPLY;
