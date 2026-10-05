@@ -30,6 +30,16 @@ export async function getWebConversation(studentId: number) {
   return { sessionId, messages: (result.data ?? []).map((row) => ({ role: row.direction === 'inbound' ? 'user' : 'assistant', text: row.message, createdAt: row.created_at })) };
 }
 
+export async function clearWebConversation(studentId: number) {
+  const sessionId = getWebSessionId(studentId);
+  const { error } = await supabase.from('message_logs').delete()
+    .eq('student_id', studentId)
+    .eq('channel', 'web_push')
+    .eq('metadata->>session_id', sessionId);
+  if (error) throw error;
+  return { sessionId };
+}
+
 async function answerWithAI(message: string, student: StudentProfile, sessionId?: string) {
   try {
     const history = sessionId ? await supabase.from('message_logs').select('direction,message').eq('student_id', student.student_id).eq('metadata->>session_id', sessionId).order('created_at', { ascending: false }).limit(8) : { data: [] };

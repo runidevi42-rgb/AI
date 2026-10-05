@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { Navigate, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom';
-import { Activity, AlertTriangle, Bell, BarChart3, CalendarDays, ChevronLeft, ChevronRight, CircleHelp, LayoutDashboard, LogOut, Menu, MessageCircle, PhoneCall, Plus, Search, Send, Trash2, X, Pencil, Users, ClipboardList, GraduationCap, Radio, CheckCircle2, ShieldAlert, UserRound } from 'lucide-react';
+import { Activity, AlertTriangle, Bell, BarChart3, CalendarDays, ChevronLeft, ChevronRight, CircleHelp, EllipsisVertical, LayoutDashboard, LogOut, Menu, MessageCircle, PhoneCall, Plus, Search, Send, Trash2, X, Pencil, Users, ClipboardList, GraduationCap, Radio, CheckCircle2, ShieldAlert, UserRound } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api, session, studentApi, studentSession } from './lib/api';
 import { resources, type Field, type ResourceConfig } from './lib/resources';
@@ -76,6 +76,9 @@ function ChatPage() {
   const [value, setValue] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [confirmClear, setConfirmClear] = useState(false);
+  const [clearing, setClearing] = useState(false);
   const endRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     let active = true;
@@ -95,6 +98,17 @@ function ChatPage() {
     } catch (err) { setError(err instanceof Error ? err.message : 'Unable to reach CampusMate AI.'); }
     finally { setLoading(false); }
   }
+  async function clearChat() {
+    if (clearing) return;
+    setClearing(true); setError('');
+    try {
+      await studentApi('/chat/history', { method: 'DELETE' });
+      setMessages([{ role: 'assistant', text: 'Hey! 👋 How can I help you today?', createdAt: new Date().toISOString() }]);
+      setConfirmClear(false); setMenuOpen(false); toast.success('Chat cleared successfully.');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unable to clear the chat right now. Please try again.');
+    } finally { setClearing(false); }
+  }
   const quickActions = [
     { label: 'Next Class', icon: CalendarDays, message: 'Which class is next?' },
     { label: "Today's Timetable", icon: CalendarDays, message: "Show today's timetable" },
@@ -104,7 +118,7 @@ function ChatPage() {
   ];
   function send(e?: FormEvent) { e?.preventDefault(); void sendMessage(value); }
   function displayTime(value?: string) { return value ? new Date(value).toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit' }) : ''; }
-  return <main className="chat-page"><header className="chat-header"><div className="chat-brand"><div className="brand-mark"><MessageCircle size={20}/></div><div><b>CampusMate AI</b><span>Personal college assistant</span></div></div><div className="chat-header-actions"><button className="secondary" onClick={() => navigate('/timetable')}>Timetable</button><button className="secondary" onClick={() => { studentSession.clear(); navigate('/student-login'); }}>Sign out</button></div></header><section className="chat-card"><div className="chat-messages">{messages.map((item, index) => <div className={`chat-row ${item.role}`} key={`${item.role}-${index}`}><div className="chat-bubble">{item.text}<small>{displayTime(item.createdAt)}</small></div></div>)}{loading && <div className="chat-row assistant"><div className="chat-bubble typing"><i/><i/><i/></div></div>}<div ref={endRef}/></div>{error && <p className="chat-error">{error}</p>}<div className="chat-quick-actions">{quickActions.map(({ label, icon: Icon, message }) => <button key={label} type="button" onClick={() => void sendMessage(message)} disabled={loading}><Icon size={15}/>{label}</button>)}</div><form className="chat-composer" onSubmit={send}><textarea value={value} onChange={(e) => setValue(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void send(e); } }} placeholder="Ask CampusMate anything..." aria-label="Message" disabled={loading} rows={1}/><button className="primary" type="submit" disabled={loading || !value.trim()}><Send size={17}/>Send</button></form></section></main>;
+  return <main className="chat-page"><header className="chat-header"><div className="chat-brand"><div className="brand-mark"><MessageCircle size={20}/></div><div><b>CampusMate AI</b><span>Personal college assistant</span></div></div><div className="chat-header-actions"><button className="secondary" onClick={() => navigate('/timetable')}>Timetable</button><div className="chat-menu"><button className="icon" title="Chat options" aria-label="Chat options" onClick={() => setMenuOpen((open) => !open)}><EllipsisVertical size={19}/></button>{menuOpen&&<div className="chat-menu-popover"><button type="button" onClick={()=>{setConfirmClear(true);setMenuOpen(false)}}><Trash2 size={15}/>Clear Chat</button></div>}</div><button className="secondary" onClick={() => { studentSession.clear(); navigate('/student-login'); }}>Sign out</button></div></header><section className="chat-card"><div className="chat-messages">{messages.map((item, index) => <div className={`chat-row ${item.role}`} key={`${item.role}-${index}`}><div className="chat-bubble">{item.text}<small>{displayTime(item.createdAt)}</small></div></div>)}{loading && <div className="chat-row assistant"><div className="chat-bubble typing"><i/><i/><i/></div></div>}<div ref={endRef}/></div>{error && <p className="chat-error">{error}</p>}<div className="chat-quick-actions">{quickActions.map(({ label, icon: Icon, message }) => <button key={label} type="button" onClick={() => void sendMessage(message)} disabled={loading}><Icon size={15}/>{label}</button>)}</div><form className="chat-composer" onSubmit={send}><textarea value={value} onChange={(e) => setValue(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void send(e); } }} placeholder="Ask CampusMate anything..." aria-label="Message" disabled={loading} rows={1}/><button className="primary" type="submit" disabled={loading || !value.trim()}><Send size={17}/>Send</button></form></section>{confirmClear&&<div className="modal-backdrop" onMouseDown={e=>{if(e.target===e.currentTarget&&!clearing)setConfirmClear(false)}}><section className="modal clear-chat-dialog"><div className="modal-head"><div><p className="eyebrow">CHAT SETTINGS</p><h2>Clear chat?</h2></div><button className="icon" onClick={()=>setConfirmClear(false)} disabled={clearing}><X/></button></div><p>This will delete your current conversation history.</p><div className="modal-actions"><button type="button" className="secondary" onClick={()=>setConfirmClear(false)} disabled={clearing}>Cancel</button><button type="button" className="danger-button" onClick={()=>void clearChat()} disabled={clearing}>{clearing?'Clearing...':'Clear Chat'}</button></div></section></div>}</main>;
 }
 
 function Shell({children}:{children:ReactNode}){

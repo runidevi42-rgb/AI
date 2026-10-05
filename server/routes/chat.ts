@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { asyncHandler } from '../lib/errors.js';
 import { logger } from '../lib/logger.js';
 import { requireStudent, type AuthRequest } from '../middleware/auth.js';
-import { answerStudentProfile, getWebConversation, getWebSessionId } from '../services/assistant.js';
+import { answerStudentProfile, clearWebConversation, getWebConversation, getWebSessionId } from '../services/assistant.js';
 import { findStudentById, getStudentTimetable } from '../services/knowledge.js';
 
 export const chatRouter = Router();
@@ -15,6 +15,17 @@ chatRouter.get('/history', asyncHandler(async (req, res) => {
     res.json(await getWebConversation(auth.student!.student_id));
   } catch {
     res.status(503).json({ error: 'The college database is temporarily unavailable. Please try again later.' });
+  }
+}));
+
+chatRouter.delete('/history', asyncHandler(async (req, res) => {
+  const auth = req as AuthRequest;
+  try {
+    await clearWebConversation(auth.student!.student_id);
+    res.json({ success: true, message: 'Chat history cleared' });
+  } catch (error) {
+    logger.error({ err: error, studentId: auth.student!.student_id }, 'Student chat history clear failed');
+    res.status(503).json({ error: 'Unable to clear the chat right now. Please try again.' });
   }
 }));
 
