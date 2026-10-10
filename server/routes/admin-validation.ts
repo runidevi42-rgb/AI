@@ -93,9 +93,46 @@ export const timetableSchema = z.object({
   batch_group: value.batch_group?.trim() || null,
 }));
 
+const noticeSchema = z.object({
+  title: z.string().trim().min(1),
+  content: z.string().trim().min(1),
+  category: z.enum(['general', 'academic', 'placement', 'internship', 'holiday', 'emergency']).default('general'),
+  priority: z.enum(['low', 'normal', 'high', 'urgent']).default('normal'),
+  department: z.string().trim().nullable().optional(),
+  semester: z.coerce.number().int().min(1).max(12).nullable().optional(),
+  expires_at: z.string().nullable().optional(),
+});
+
+const eventSchema = z.object({
+  title: z.string().trim().min(1),
+  description: z.string().trim().nullable().optional(),
+  event_type: z.enum(['event', 'holiday', 'workshop', 'seminar', 'placement']).default('event'),
+  start_at: z.string().min(1),
+  end_at: z.string().min(1),
+  venue: z.string().trim().nullable().optional(),
+  department: z.string().trim().nullable().optional(),
+});
+
+const facultySchema = z.object({
+  full_name: z.string().trim().min(1),
+  designation: z.string().trim().min(1),
+  department: z.string().trim().min(1),
+  email: z.string().trim().email().nullable().optional().or(z.literal('')),
+  phone: z.string().trim().nullable().optional(),
+  office: z.string().trim().nullable().optional(),
+  office_room: z.string().trim().nullable().optional(),
+  office_hours: z.string().trim().nullable().optional(),
+  subjects: z.string().trim().nullable().optional(),
+  active: z.boolean().default(true),
+});
+
 export function validatedPayload(table: string, body: Record<string, unknown>): Record<string, unknown> {
+  if (table === 'timetables') return timetableSchema.parse(body);
   if (table === 'assignments') return assignmentSchema.parse(body);
   if (table === 'exams') return examSchema.parse(body);
+  if (table === 'notices') return noticeSchema.parse(body);
+  if (table === 'events') return eventSchema.parse(body);
+  if (table === 'faculty') return facultySchema.parse(body);
   if (table === 'college_info') return collegeInfoSchema.parse(body);
   if (table === 'emergency_contacts') return emergencyContactSchema.parse(body);
   if (table === 'attendance') return attendanceSchema.parse(body);

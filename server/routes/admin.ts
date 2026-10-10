@@ -7,6 +7,7 @@ import { supabase } from '../lib/supabase.js';
 import { requireAdmin } from '../middleware/auth.js';
 import { dispatchNotification, notifyTimetableChange } from '../services/notifications.js';
 import { timetableSchema, validatedPayload } from './admin-validation.js';
+import { interpretAdminPrompt } from '../services/admin-prompt.js';
 
 export const adminRouter = Router();
 adminRouter.use(requireAdmin);
@@ -113,6 +114,64 @@ adminRouter.delete('/timetables/:id', asyncHandler(async (req, res) => {
   if (error) throw new AppError(400, error.message);
   res.sendStatus(204);
 }));
+
+// Natural-language prompt interpretation for AI data management
+adminRouter.post('/interpret-prompt', asyncHandler(async (req, res) => {
+  const { prompt } = z.object({
+    prompt: z.string().trim().min(2, 'Please enter a prompt of at least 2 characters'),
+  }).parse(req.body);
+
+  const result = await interpretAdminPrompt(prompt);
+  res.json(result);
+}));
+
+// Apply reviewed and confirmed changes to Supabase
+adminRouter.post('/confirm-changes', asyncHandler(async (req, res) => {
+  const input = z.object({
+    action: z.enum(['insert', 'update', 'delete']),
+    target_resource: z.string().trim(),
+    target_id: z.union([z.string(), z.number()]).optional(),
+    record: z.record(z.string(), z.unknown()).default({}),
+  }).parse(req.body);
+
+  const table = resource(input.target_resource);
+  const primaryKey = table === 'students' ? 'student_id' : 'id';
+
+  if (input.action === 'delete') {
+    if (!input.target_id) throw new AppError(400, 'Target record ID is required for deletion');
+    const { error } = await supabase.from(table).delete().eq(primaryKey, input.target_id);
+    if (error) throw new AppError(400, error.message);
+    return res.json({ success: true, message: `Record deleted successfully from ${table}`, action: 'delete' });
+  }
+
+  // insert or update
+  const payload = validatedPayload(table, input.record);
+
+  if (input.action === 'insert') {
+    if (table === 'timetables') {
+      await ensureTimetableNoConflict(payload);
+    }
+    const { data, error } = await supabase.from(table).insert(payload).select().single();
+    if (error) throw new AppError(400, error.message);
+    if (table === 'timetables') void notifyTimetableChange(data).catch((err) => logger.error({ err }, 'Timetable notification failed'));
+    return res.status(201).json({ success: true, message: `Record created successfully in ${table}`, data, action: 'insert' });
+  }
+
+  if (input.action === 'update') {
+    if (!input.target_id) throw new AppError(400, 'Target record ID is required to update an existing record');
+    if (table === 'timetables') {
+      await ensureTimetableNoConflict(payload, String(input.target_id));
+    }
+    const updateBody = { ...payload } as Record<string, unknown>;
+    delete updateBody.id;
+    delete updateBody.created_at;
+    const { data, error } = await supabase.from(table).update({ ...updateBody, updated_at: new Date().toISOString() }).eq(primaryKey, input.target_id).select().single();
+    if (error) throw new AppError(400, error.message);
+    if (table === 'timetables') void notifyTimetableChange(data).catch((err) => logger.error({ err }, 'Timetable notification failed'));
+    return res.json({ success: true, message: `Record updated successfully in ${table}`, data, action: 'update' });
+  }
+}));
+
 
 adminRouter.get('/:resource', asyncHandler(async (req, res) => {
   const table = resource(String(req.params.resource));

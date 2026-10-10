@@ -10,9 +10,9 @@ const groq = new Groq({ apiKey: config.GROQ_API_KEY });
 const AI_FAILURE_REPLY = 'I am temporarily unable to process this question. Please try again.';
 const DB_FAILURE_REPLY = 'The college database is temporarily unavailable. Please try again later.';
 
-export function getWhatsAppSessionId(studentId: number) { return `whatsapp-${studentId}`; }
+export function getWhatsAppSessionId(studentId: string | number) { return `whatsapp-${studentId}`; }
 
-async function logConversation(phone: string, studentId: number | undefined, incoming: string, response: string, intent: ChatbotIntent, sessionId?: string, channel = 'whatsapp', messageId?: string) {
+async function logConversation(phone: string, studentId: string | number | undefined, incoming: string, response: string, intent: ChatbotIntent, sessionId?: string, channel = 'whatsapp', messageId?: string) {
   const storageChannel = channel === 'web' ? 'web_push' : channel;
   const { error } = await supabase.from('message_logs').insert([
     { phone, student_id: studentId, direction: 'inbound', message: incoming, status: 'received', provider_message_id: channel === 'whatsapp' ? messageId : undefined, channel: storageChannel, metadata: { intent, channel, session_id: sessionId } },
@@ -21,16 +21,16 @@ async function logConversation(phone: string, studentId: number | undefined, inc
   if (error) logger.warn({ message: error.message, code: error.code }, 'Conversation audit log failed');
 }
 
-export function getWebSessionId(studentId: number) { return `web-${studentId}`; }
+export function getWebSessionId(studentId: string | number) { return `web-${studentId}`; }
 
-export async function getWebConversation(studentId: number) {
+export async function getWebConversation(studentId: string | number) {
   const sessionId = getWebSessionId(studentId);
   const result = await supabase.from('message_logs').select('direction,message,created_at,metadata').eq('student_id', studentId).eq('channel', 'web_push').eq('metadata->>session_id', sessionId).order('created_at', { ascending: true }).limit(100);
   if (result.error) throw result.error;
   return { sessionId, messages: (result.data ?? []).map((row) => ({ role: row.direction === 'inbound' ? 'user' : 'assistant', text: row.message, createdAt: row.created_at })) };
 }
 
-export async function clearWebConversation(studentId: number) {
+export async function clearWebConversation(studentId: string | number) {
   const sessionId = getWebSessionId(studentId);
   const { error } = await supabase.from('message_logs').delete()
     .eq('student_id', studentId)
@@ -45,7 +45,7 @@ async function answerWithAI(message: string, student: StudentProfile, sessionId?
     const history = sessionId ? await supabase.from('message_logs').select('direction,message').eq('student_id', student.student_id).eq('metadata->>session_id', sessionId).order('created_at', { ascending: false }).limit(8) : { data: [] };
     const previous = (history.data ?? []).reverse().map((item) => ({ role: item.direction === 'inbound' ? 'user' as const : 'assistant' as const, content: item.message }));
     const messages = [
-      { role: 'system' as const, content: 'You are a concise, friendly college study assistant. Answer greetings and study/general questions only. Never invent official college data, student details, attendance, exams, timetable, assignments, notices, or contacts. Say that official information is unavailable when asked for it.' },
+      { role: 'system' as const, content: 'You are CampusMate AI, a helpful, intelligent college and study assistant. You answer student queries and explain concepts (such as computer networking, operating systems, DNS, TCP/UDP, algorithms, and general academic subjects) clearly, concisely, and helpfully. For general knowledge and conversational questions, provide accurate and easy-to-understand explanations. Never invent official college administrative facts (such as specific college attendance, exam schedules, timetables, internal notices, or faculty phone numbers); if asked for official college information that is not available, advise the student that verified records should be confirmed through the college database or administration.' },
       ...previous,
       { role: 'user' as const, content: message },
     ];
@@ -119,6 +119,11 @@ export async function answerStudentProfile(student: StudentProfile, message: str
   }
   if (intent === 'GOODBYE') {
     const text = 'Goodbye! 👋 Have a great day.';
+    await logConversation(phone, student.student_id, message, text, intent, sessionId, channel, messageId);
+    return { authenticated: true, text, studentId: student.student_id, intent };
+  }
+  if (intent === 'CAPABILITIES') {
+    const text = 'I am CampusMate AI, your personal college assistant! Here is what I can do for you:\n\n• Timetable & Classes: Ask "Which class is next?" or "Show today\'s timetable".\n• Attendance: Ask "What is my attendance?".\n• Assignments & Exams: Ask "Any pending assignments?" or "When is my next exam?".\n• College Notices: Ask "Show latest notices".\n• Contacts: Ask "Faculty contacts" or "Emergency numbers".\n• Study Doubts: Ask any conceptual question like "Explain DNS", "What is an OS?", or "Difference between TCP and UDP".';
     await logConversation(phone, student.student_id, message, text, intent, sessionId, channel, messageId);
     return { authenticated: true, text, studentId: student.student_id, intent };
   }

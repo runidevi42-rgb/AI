@@ -20,7 +20,7 @@ export async function api<T>(path: string, options: RequestInit = {}): Promise<T
     ...options,
     headers: { 'Content-Type': 'application/json', ...(session.get() ? { Authorization: `Bearer ${session.get()}` } : {}), ...options.headers },
   });
-  if (response.status === 401) { session.clear(); if (!path.includes('/auth/login')) location.assign('/login'); }
+  if (response.status === 401) { session.clear(); if (!path.includes('/auth/login') && !path.includes('/auth/admin-login')) location.assign('/admin/login'); }
   if (!response.ok) {
     const body = await response.json().catch(() => ({ error: 'Request failed' }));
     throw new Error(body.error ?? 'Request failed');

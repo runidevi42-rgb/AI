@@ -8,7 +8,7 @@ export type Intent = 'timetable' | 'assignments' | 'exams' | 'attendance' | 'fac
 export type ProfileIntent = 'name' | 'roll_number' | 'student_id' | 'department' | 'course' | 'semester' | 'whatsapp_number' | 'assistant_identity' | 'profile';
 
 export interface StudentProfile {
-  student_id: number;
+  student_id: string | number;
   full_name: string;
   whatsapp_number: string;
   roll_number: number;
@@ -101,10 +101,13 @@ export async function findStudent(phone: string) {
   return data as StudentProfile | null;
 }
 
-export async function findStudentById(studentId: number) {
+export async function findStudentById(studentId: string | number) {
   const baseSelect = 'student_id,full_name,whatsapp_number,roll_number,department,course,semester';
   let result = await supabase.from('students').select(`${baseSelect},section,batch_group`).eq('student_id', studentId).maybeSingle();
   if (result.error?.code === '42703') result = await supabase.from('students').select(baseSelect).eq('student_id', studentId).maybeSingle();
+  if (!result.data && typeof studentId === 'string' && /^\d+$/.test(studentId)) {
+    result = await supabase.from('students').select(`${baseSelect},section,batch_group`).eq('student_id', Number(studentId)).maybeSingle();
+  }
   const { data, error } = result;
   if (error) throw error;
   return data as StudentProfile | null;
@@ -197,7 +200,7 @@ function requestedWeekday(query: string) {
   return match ? match[1] : undefined;
 }
 
-async function getAttendancePercentage(studentId: number) {
+async function getAttendancePercentage(studentId: string | number) {
   const direct = await supabase.from('student_attendance_summary').select('student_id,attendance_percentage').eq('student_id', studentId).maybeSingle();
   if (!isMissingRelation(direct.error)) {
     if (direct.error) throw direct.error;

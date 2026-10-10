@@ -13,8 +13,10 @@ import { authRouter } from './routes/auth.js';
 import { adminRouter } from './routes/admin.js';
 import { webhookRouter } from './routes/webhook.js';
 import { chatRouter } from './routes/chat.js';
+import { studentRouter } from './routes/student.js';
 import { startScheduler } from './services/scheduler.js';
-import { assertDatabaseConnection } from './lib/supabase.js';
+import { assertDatabaseConnection, supabase } from './lib/supabase.js';
+import { asyncHandler, AppError } from './lib/errors.js';
 
 const app = express();
 const allowedOrigins = new Set([
@@ -35,6 +37,20 @@ app.use(pinoHttp({ logger }));
 app.use('/api/auth', rateLimit({ windowMs: 15 * 60_000, limit: 30 }), authRouter);
 app.use('/api/admin', rateLimit({ windowMs: 60_000, limit: 300 }), adminRouter);
 app.use('/api/chat', rateLimit({ windowMs: 60_000, limit: 60 }), chatRouter);
+app.use('/api/student', rateLimit({ windowMs: 60_000, limit: 120 }), studentRouter);
+
+app.get('/api/faculty', asyncHandler(async (_req, res) => {
+  const { data, error } = await supabase.from('faculty').select('id,full_name,designation,department,email,phone,office,office_room,office_hours,subjects').eq('active', true).order('full_name');
+  if (error) throw new AppError(500, 'Unable to load faculty contacts');
+  res.json({ faculty: data ?? [] });
+}));
+
+app.get('/api/emergency-contacts', asyncHandler(async (_req, res) => {
+  const { data, error } = await supabase.from('emergency_contacts').select('id,contact_name,phone_number,role_or_service,emergency_type,description,priority,contact_type').eq('active', true).order('priority');
+  if (error) throw new AppError(500, 'Unable to load emergency contacts');
+  res.json({ emergencyContacts: data ?? [] });
+}));
+
 app.use('/webhook/whatsapp', webhookRouter);
 const dirname = path.dirname(fileURLToPath(import.meta.url));
 const clientPath = path.resolve(dirname, '../../dist');

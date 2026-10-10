@@ -6,7 +6,7 @@ import { normalizePhoneNumber } from '../utils/phone.js';
 
 const endpoint = `https://graph.facebook.com/${config.WHATSAPP_API_VERSION}/${config.WHATSAPP_PHONE_NUMBER_ID}/messages`;
 
-export type DeliveryContext = { notificationId?: string; studentId?: number };
+export type DeliveryContext = { notificationId?: string; studentId?: string | number };
 
 export function normalizePhone(value: string) {
   return normalizePhoneNumber(value);
