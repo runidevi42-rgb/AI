@@ -222,19 +222,11 @@ export async function fetchStructuredAnswer(student: StudentProfile, intent: 'AT
   const scope = { department: student.department, semester: student.semester };
   let records: any[] = [];
   if (intent === 'ATTENDANCE') {
-    const result = await supabase.from('attendance_summary').select('subject,total_classes,present_classes,percentage').eq('student_id', student.student_id).order('subject');
-    if (result.error) throw result.error;
-    records = result.data ?? [];
-    if (!records.length) return NO_INFORMATION_REPLY;
-    const overall = records.reduce((a, r) => ({ present: a.present + Number(r.present_classes || 0), total: a.total + Number(r.total_classes || 0) }), { present: 0, total: 0 });
-    const overallPct = overall.total ? Math.round(overall.present / overall.total * 1000) / 10 : 0;
-    return `Your current attendance is ${overallPct}%.\n` + records.map((r) => `• ${r.subject}: ${r.percentage}%`).join('\n');
+    const percentage = await getAttendancePercentage(student.student_id);
+    return percentage === null ? NO_INFORMATION_REPLY : `Your current attendance is ${percentage}%.`;
   }
   if (intent === 'TIMETABLE') {
-    const day = new Intl.DateTimeFormat('en-US', { weekday: 'long', timeZone: config.COLLEGE_TIMEZONE }).format(now);
-    const result = await supabase.from('timetables').select('day_of_week,start_time,end_time,subject,room').match(scope).ilike('day_of_week', day).order('start_time');
-    if (result.error) throw result.error;
-    records = result.data ?? [];
+    records = await getTodayTimetable(student, now);
     if (!records.length) return NO_INFORMATION_REPLY;
     return `Your classes today are:\n${records.map((r) => `• ${r.subject} — ${displayTime(r.start_time)}${r.room ? ` (${r.room})` : ''}`).join('\n')}`;
   }
@@ -402,8 +394,7 @@ export async function retrieveContext(student: StudentProfile, query: string) {
   let records: unknown[] = [];
 
   if (intent === 'timetable') {
-    const { data } = await supabase.from('timetables').select('*').ilike('day_of_week', collegeNow.weekday).order('start_time');
-    records = data ?? [];
+    records = await getTodayTimetable(student, today);
   } else if (intent === 'assignments') {
     const { data } = await supabase.from('assignments').select('title,subject,description,due_at').eq('department', scope.department).eq('semester', scope.semester).gte('due_at', today.toISOString()).order('due_at').limit(10);
     records = data ?? [];
@@ -411,8 +402,8 @@ export async function retrieveContext(student: StudentProfile, query: string) {
     const { data } = await supabase.from('exams').select('title,subject,exam_date,start_time,end_time,instructions').eq('department', scope.department).eq('semester', scope.semester).gte('exam_date', date).order('exam_date').limit(12);
     records = data ?? [];
   } else if (intent === 'attendance') {
-    const { data } = await supabase.from('attendance_summary').select('subject,total_classes,present_classes,percentage').eq('student_id', student.student_id).order('subject');
-    records = data ?? [];
+    const percentage = await getAttendancePercentage(student.student_id);
+    records = percentage === null ? [] : [{ student_id: student.student_id, attendance_percentage: percentage }];
   } else if (intent === 'faculty') {
     const { data } = await supabase.from('faculty').select('full_name,designation,department,email,phone,office,office_hours').eq('active', true).or(`department.eq.${scope.department},department.eq.General`).limit(20);
     records = data ?? [];

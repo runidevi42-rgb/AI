@@ -1,16 +1,36 @@
-import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
+import { createContext, useContext, useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { Navigate, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom';
 import {
   Activity, AlertTriangle, Bell, BarChart3, CalendarDays, ChevronLeft, ChevronRight,
   CircleHelp, EllipsisVertical, LayoutDashboard, LogOut, Menu, MessageCircle, PhoneCall,
   Plus, Search, Send, Trash2, X, Pencil, Users, ClipboardList, GraduationCap, Radio,
-  CheckCircle2, ShieldAlert, UserRound, Sparkles, Check, RefreshCw
+  CheckCircle2, ShieldAlert, UserRound, Sparkles, Check, RefreshCw, Moon, Sun
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api, session, studentApi, studentSession } from './lib/api';
 import { resources, type Field, type ResourceConfig } from './lib/resources';
 import type { ApiList, DashboardStats } from '../shared/types';
 import type { EmergencyContact } from '../shared/types';
+
+type Theme = 'light' | 'dark';
+const ThemeContext = createContext<{ theme: Theme; toggle: () => void }>({ theme: 'light', toggle: () => undefined });
+
+function ThemeProvider({ children }: { children: ReactNode }) {
+  const [theme, setTheme] = useState<Theme>(() => {
+    const saved = localStorage.getItem('campusmate-theme');
+    return saved === 'dark' ? 'dark' : 'light';
+  });
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+    localStorage.setItem('campusmate-theme', theme);
+  }, [theme]);
+  return <ThemeContext.Provider value={{ theme, toggle: () => setTheme((value) => value === 'dark' ? 'light' : 'dark') }}>{children}</ThemeContext.Provider>;
+}
+
+function ThemeToggle() {
+  const { theme, toggle } = useContext(ThemeContext);
+  return <button className="icon theme-toggle" type="button" onClick={toggle} title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`} aria-label={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}>{theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}</button>;
+}
 
 // ==========================================
 // 1. SEPARATE ADMIN LOGIN
@@ -57,6 +77,7 @@ function AdminLogin() {
         </div>
       </section>
       <section className="login-panel">
+        <div className="login-theme"><ThemeToggle /></div>
         <form className="login-form" onSubmit={submit}>
           <div className="mobile-logo">
             <MessageCircle />
@@ -149,6 +170,7 @@ function StudentLogin() {
         </div>
       </section>
       <section className="login-panel">
+        <div className="login-theme"><ThemeToggle /></div>
         <form className="login-form" onSubmit={submit}>
           <div className="mobile-logo">
             <MessageCircle />
@@ -291,6 +313,7 @@ function ChatPage() {
           </div>
         </div>
         <div className="chat-header-actions">
+          <ThemeToggle />
           <button className="secondary" onClick={() => navigate('/timetable')}>Timetable</button>
           <div className="chat-menu">
             <button className="icon" title="Chat options" aria-label="Chat options" onClick={() => setMenuOpen((open) => !open)}>
@@ -418,6 +441,7 @@ function StudentTimetablePage() {
           </div>
         </div>
         <div className="chat-header-actions">
+          <ThemeToggle />
           <button className="secondary" onClick={() => navigate('/chat')}>Back to chat</button>
           <button className="secondary" onClick={() => { studentSession.clear(); navigate('/student-login'); }}>Sign out</button>
         </div>
@@ -833,6 +857,7 @@ function AdminShell({ children }: { children: ReactNode }) {
           <button className="icon menu" onClick={() => setOpen(true)}><Menu /></button>
           <div className="header-title"><span>Campus Operations & AI Management</span></div>
           <div className="header-actions">
+            <ThemeToggle />
             <button className="icon" title="Help"><CircleHelp /></button>
             <div className="avatar">CA</div>
           </div>
@@ -1627,7 +1652,7 @@ function StudentTimetableProtected() {
 
 export default function App() {
   return (
-    <Routes>
+    <ThemeProvider><Routes>
       {/* 
         First screen when visiting the website: Student Login!
         If already authenticated as student, directs to /chat.
@@ -1661,6 +1686,6 @@ export default function App() {
 
       {/* Catch-all */}
       <Route path="*" element={<Navigate to="/" />} />
-    </Routes>
+    </Routes></ThemeProvider>
   );
 }

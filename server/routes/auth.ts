@@ -41,7 +41,7 @@ authRouter.post('/student-login', asyncHandler(async (req, res) => {
   const phone = normalizePhone(rawPhone);
   const candidates = phone.startsWith('91') && phone.length === 12 ? [phone, phone.slice(2)] : [phone];
 
-  let query = supabase
+  const query = supabase
     .from('students')
     .select('student_id,full_name,whatsapp_number,department,course,semester')
     .eq('student_id', input.student_id)

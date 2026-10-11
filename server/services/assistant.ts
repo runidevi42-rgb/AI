@@ -30,9 +30,9 @@ export async function getWebConversation(studentId: string | number) {
   return { sessionId, messages: (result.data ?? []).map((row) => ({ role: row.direction === 'inbound' ? 'user' : 'assistant', text: row.message, createdAt: row.created_at })) };
 }
 
-export async function clearWebConversation(studentId: string | number) {
+export async function clearWebConversation(studentId: string | number, database: Pick<typeof supabase, 'from'> = supabase) {
   const sessionId = getWebSessionId(studentId);
-  const { error } = await supabase.from('message_logs').delete()
+  const { error } = await database.from('message_logs').delete()
     .eq('student_id', studentId)
     .eq('channel', 'web_push')
     .eq('metadata->>session_id', sessionId);
