@@ -124,9 +124,10 @@ export function timetableRowsForStudent(rows: any[], student: StudentProfile, in
     if (row.course && student.course && String(row.course).toLowerCase() !== String(student.course).toLowerCase()) return false;
     if (row.semester != null && student.semester != null && Number(row.semester) !== Number(student.semester)) return false;
     const rowGroup = row.batch_group || row.batch || row.section;
-    // A batch-specific record is not safe to show until the authenticated student
-    // has a matching group in the students table. Never guess a section from roll no.
-    if (rowGroup && (!group || String(rowGroup).toLowerCase() !== String(group).toLowerCase())) return false;
+    // If the students table has no group/section column or value, keep all stored
+    // schedule rows for that student rather than silently dropping practicals.
+    // When a group is available, only matching batch rows are returned.
+    if (rowGroup && group && String(rowGroup).toLowerCase() !== String(group).toLowerCase()) return false;
     if (!includeBreaks && (row.is_recess || /^recess|no class$/i.test(String(row.subject || '').trim()))) return false;
     if (timeToMinutes(row.start_time) === null || timeToMinutes(row.end_time) === null) return false;
     const key = [row.day_of_week, row.start_time, row.end_time, row.subject, row.teacher, row.room, row.batch_group].map(String).join('|');
@@ -340,7 +341,9 @@ export async function fetchCompleteStructuredAnswer(student: StudentProfile, int
       return request.tomorrow ? 'Tomorrow is Sunday, a holiday. No classes are scheduled.' : 'Sunday is a holiday. No classes are scheduled.';
     }
     const isSingleDay = Boolean(requestedWeekday(q) || /\b(today|aaj|tomorrow|next day|kal)\b/.test(q));
-    const rows = full && !isSingleDay ? await queryTimetableRows(student) : await queryTimetableRows(student, request.day);
+    const rows = full && !isSingleDay
+      ? await queryTimetableRows(student, undefined, true)
+      : await queryTimetableRows(student, request.day, true);
     if (config.NODE_ENV === 'development') logger.info({
       studentId: student.student_id,
       department: student.department,

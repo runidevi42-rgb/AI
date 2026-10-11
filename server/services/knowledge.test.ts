@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildProfileResponse, detectIntent, detectProfileIntent, formatTimetableAnswer, requestedWeekday, resolveTimetableDay, type StudentProfile } from './knowledge.js';
+import { buildProfileResponse, detectIntent, detectProfileIntent, formatTimetableAnswer, requestedWeekday, resolveTimetableDay, timetableRowsForStudent, type StudentProfile } from './knowledge.js';
 import { normalizePhone } from './whatsapp.js';
 import { detectChatbotIntent } from './intent.js';
 
@@ -54,6 +54,28 @@ describe('date-based timetable resolution', () => {
 
   it('returns a safe empty-day response without inventing classes', () => {
     expect(formatTimetableAnswer('Tuesday', [])).toBe("I couldn't find any classes scheduled for Tuesday.");
+  });
+
+  it('keeps every stored Monday slot when the student has no group metadata', () => {
+    const rows = [
+      ['SE', null, false], ['Data Communication & Computer Network', '5CSE2', false],
+      ['AI Basic Lab', '5CSE1', false], ['Recess', null, true],
+      ['DS: DW & DM', null, false], ['Entrepreneurship Development & Start-ups Lab', '5CSE1', false],
+      ['No Class', null, false],
+    ].map(([subject, batch_group, is_recess], index) => ({ day_of_week: 'Monday', start_time: `${String(10 + index).padStart(2, '0')}:00`, end_time: `${String(11 + index).padStart(2, '0')}:00`, subject, batch_group, is_recess }));
+    const result = timetableRowsForStudent(rows, { student_id: 48, full_name: 'Student', whatsapp_number: '', roll_number: 48, department: 'Computer Science', course: 'Diploma', semester: 5 }, true);
+    expect(result).toHaveLength(7);
+    expect(result.map((row) => row.subject)).toEqual(['SE', 'Data Communication & Computer Network', 'AI Basic Lab', 'Recess', 'DS: DW & DM', 'Entrepreneurship Development & Start-ups Lab', 'No Class']);
+  });
+
+  it('filters batch-specific rows when the authenticated student has a group', () => {
+    const rows = [
+      { day_of_week: 'Monday', start_time: '10:00', end_time: '11:00', subject: 'Common', batch_group: null },
+      { day_of_week: 'Monday', start_time: '11:00', end_time: '12:00', subject: 'CSE1 Lab', batch_group: '5CSE1' },
+      { day_of_week: 'Monday', start_time: '12:00', end_time: '13:00', subject: 'CSE2 Lab', batch_group: '5CSE2' },
+    ];
+    const result = timetableRowsForStudent(rows, { student_id: 48, full_name: 'Student', whatsapp_number: '', roll_number: 48, department: 'Computer Science', course: 'Diploma', semester: 5, batch_group: '5CSE1' });
+    expect(result.map((row) => row.subject)).toEqual(['Common', 'CSE1 Lab']);
   });
 });
 
