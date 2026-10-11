@@ -195,9 +195,41 @@ export async function getBreakTimetable(student: StudentProfile, day?: string) {
   return (await queryTimetableRows(student, day, true)).filter((row) => row.is_recess || /^recess|break$/i.test(String(row.subject || '').trim()));
 }
 
-function requestedWeekday(query: string) {
+export function requestedWeekday(query: string) {
   const match = query.match(/\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/i);
-  return match ? match[1] : undefined;
+  return match ? `${match[1].charAt(0).toUpperCase()}${match[1].slice(1).toLowerCase()}` : undefined;
+}
+
+function collegeDayOffset(now: Date, days: number) {
+  const current = getCurrentCollegeDateTime(now);
+  const [year, month, day] = current.date.split('-').map(Number);
+  const target = new Date(Date.UTC(year, month - 1, day + days, 12, 0, 0));
+  return {
+    date: target.toISOString().slice(0, 10),
+    weekday: new Intl.DateTimeFormat('en-US', { weekday: 'long', timeZone: 'UTC' }).format(target),
+  };
+}
+
+export function resolveTimetableDay(query: string, now = new Date()) {
+  const q = query.toLowerCase();
+  const tomorrow = /\b(tomorrow|next day|kal)\b/.test(q);
+  const explicitDay = requestedWeekday(q);
+  const current = getCurrentCollegeDateTime(now);
+  const target = tomorrow ? collegeDayOffset(now, 1) : { date: current.date, weekday: current.weekday };
+  const day = explicitDay ?? target.weekday;
+  return { day, date: explicitDay ? undefined : target.date, tomorrow, sunday: day === 'Sunday' };
+}
+
+function formatTimetableRows(rows: any[], includeDay = false) {
+  return rows.map((row) => {
+    const details = [row.teacher, row.batch_group || row.batch || row.section, row.room].filter(Boolean).join(' · ');
+    return `- ${includeDay ? `${row.day_of_week}: ` : ''}${row.subject} — ${displayTime(row.start_time)} to ${displayTime(row.end_time)}${details ? ` (${details})` : ''}`;
+  }).join('\n');
+}
+
+export function formatTimetableAnswer(day: string, rows: any[], complete = false) {
+  if (!rows.length) return `I couldn't find any classes scheduled for ${day}.`;
+  return `${complete ? 'Your complete timetable is:' : `Your timetable for ${day} is:`}\n${formatTimetableRows(rows, complete)}`;
 }
 
 async function getAttendancePercentage(studentId: string | number) {
@@ -277,7 +309,6 @@ export async function fetchCompleteStructuredAnswer(student: StudentProfile, int
       : NO_INFORMATION_REPLY;
   }
   if (intent === 'TIMETABLE') {
-    const day = collegeNow.weekday;
     const nextClass = /next class|next lecture|next period|what do i have next|which class.*next|after this class|agla class|meri next class|aaj next class/.test(q);
     const currentClass = /what class.*(now|currently)|which class.*(now|currently)|current class|class.*abhi|abhi.*class/.test(q);
     if (currentClass) {
@@ -304,13 +335,12 @@ export async function fetchCompleteStructuredAnswer(student: StudentProfile, int
       }
       return NO_INFORMATION_REPLY;
     }
-    // The deployed timetable table is intentionally read with `*` because existing
-    // installations use different optional columns (for example, some have `room`
-    // while the current table has `teacher`, `batch_group`, and `is_recess`). This
-    // keeps the chatbot compatible with the real schema without inventing columns.
-    const rows = !full && /today|aaj|schedule/.test(q)
-      ? await getTodayTimetable(student, now)
-      : await queryTimetableRows(student);
+    const request = resolveTimetableDay(q, now);
+    if (request.sunday) {
+      return request.tomorrow ? 'Tomorrow is Sunday, a holiday. No classes are scheduled.' : 'Sunday is a holiday. No classes are scheduled.';
+    }
+    const isSingleDay = Boolean(requestedWeekday(q) || /\b(today|aaj|tomorrow|next day|kal)\b/.test(q));
+    const rows = full && !isSingleDay ? await queryTimetableRows(student) : await queryTimetableRows(student, request.day);
     if (config.NODE_ENV === 'development') logger.info({
       studentId: student.student_id,
       department: student.department,
@@ -321,8 +351,7 @@ export async function fetchCompleteStructuredAnswer(student: StudentProfile, int
       timezone: collegeNow.timezone,
       selectedRecords: rows.map((row) => ({ day: row.day_of_week, start: row.start_time, end: row.end_time, subject: row.subject, room: row.room ?? null })),
     }, 'Timetable records selected');
-    if (!rows.length) return NO_INFORMATION_REPLY;
-    return `${full ? 'Your complete timetable is:' : `Your classes on ${day} are:`}\n` + rows.map((row) => `- ${row.day_of_week}: ${row.subject} ${displayTime(row.start_time)}-${displayTime(row.end_time)}${row.room ? ` (${row.room})` : ''}`).join('\n');
+    return formatTimetableAnswer(request.day, rows, full && !isSingleDay);
   }
   if (intent === 'ASSIGNMENT') {
     let queryBuilder = supabase.from('assignments').select('title,subject,description,due_at').match(scope).order('due_at');

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildProfileResponse, detectIntent, detectProfileIntent, type StudentProfile } from './knowledge.js';
+import { buildProfileResponse, detectIntent, detectProfileIntent, formatTimetableAnswer, requestedWeekday, resolveTimetableDay, type StudentProfile } from './knowledge.js';
 import { normalizePhone } from './whatsapp.js';
 import { detectChatbotIntent } from './intent.js';
 
@@ -34,6 +34,27 @@ describe('detectIntent', () => {
   ])('routes %s to %s', (query, intent) => expect(detectIntent(query)).toBe(intent));
 
   it('falls back to verified general knowledge', () => expect(detectIntent('where is the library')).toBe('general'));
+});
+
+describe('date-based timetable resolution', () => {
+  it('calculates tomorrow in Asia/Kolkata at a date boundary', () => {
+    const sundayAtMidnight = new Date('2026-10-03T18:30:00.000Z');
+    expect(resolveTimetableDay('Show tomorrow timetable', sundayAtMidnight)).toMatchObject({ day: 'Monday', tomorrow: true, sunday: false });
+  });
+
+  it('resolves Sunday tomorrow explicitly', () => {
+    const saturdayAtMidnight = new Date('2026-10-02T18:30:00.000Z');
+    expect(resolveTimetableDay('tomorrow timetable', saturdayAtMidnight)).toMatchObject({ day: 'Sunday', tomorrow: true, sunday: true });
+  });
+
+  it('keeps an explicit weekday instead of using the current day', () => {
+    expect(requestedWeekday("What's Friday's timetable?")).toBe('Friday');
+    expect(resolveTimetableDay("Show Friday's timetable", new Date('2026-10-03T18:30:00.000Z'))).toMatchObject({ day: 'Friday', tomorrow: false });
+  });
+
+  it('returns a safe empty-day response without inventing classes', () => {
+    expect(formatTimetableAnswer('Tuesday', [])).toBe("I couldn't find any classes scheduled for Tuesday.");
+  });
 });
 
 describe('normalizePhone', () => {
