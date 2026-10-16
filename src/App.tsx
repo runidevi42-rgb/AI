@@ -4,7 +4,7 @@ import {
   Activity, AlertTriangle, Bell, BarChart3, CalendarDays, ChevronLeft, ChevronRight,
   CircleHelp, EllipsisVertical, LayoutDashboard, LogOut, Menu, MessageCircle, PhoneCall,
   Plus, Search, Send, Trash2, X, Pencil, Users, ClipboardList, GraduationCap, Radio,
-  CheckCircle2, ShieldAlert, UserRound, Sparkles, Check, RefreshCw
+  CheckCircle2, ShieldAlert, UserRound, Sparkles, Check, RefreshCw, Moon, Sun
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api, session, studentApi, studentSession } from './lib/api';
@@ -14,20 +14,21 @@ import type { EmergencyContact } from '../shared/types';
 import ngpLogo from './NGP_Patna13_logo.jpg';
 import ngpBackground from './NGP_Patna13_background.jpg';
 
-type Theme = 'dark';
-const ThemeContext = createContext<{ theme: Theme }>({ theme: 'dark' });
+type Theme = 'light' | 'dark';
+const ThemeContext = createContext<{ theme: Theme; toggle: () => void }>({ theme: 'light', toggle: () => undefined });
 
 function ThemeProvider({ children }: { children: ReactNode }) {
+  const [theme, setTheme] = useState<Theme>(() => localStorage.getItem('campusmate-theme') === 'dark' ? 'dark' : 'light');
   useEffect(() => {
-    document.documentElement.dataset.theme = 'dark';
-    localStorage.setItem('campusmate-theme', 'dark');
-  }, []);
-  return <ThemeContext.Provider value={{ theme: 'dark' }}>{children}</ThemeContext.Provider>;
+    document.documentElement.dataset.theme = theme;
+    localStorage.setItem('campusmate-theme', theme);
+  }, [theme]);
+  return <ThemeContext.Provider value={{ theme, toggle: () => setTheme((value) => value === 'dark' ? 'light' : 'dark') }}>{children}</ThemeContext.Provider>;
 }
 
 function ThemeToggle() {
-  useContext(ThemeContext);
-  return null;
+  const { theme, toggle } = useContext(ThemeContext);
+  return <button className="icon theme-toggle" type="button" onClick={toggle} title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`} aria-label={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}>{theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}</button>;
 }
 
 // ==========================================
@@ -63,7 +64,7 @@ function AdminLogin() {
 
   return (
     <main className="login-page">
-      <section className="login-brand" style={{ backgroundImage: `linear-gradient(rgba(19,35,29,.38), rgba(19,35,29,.38)), url(${ngpBackground})` }}>
+      <section className="login-brand" style={{ backgroundImage: `url(${ngpBackground})` }}>
         <div className="brand-mark"><img src={ngpLogo} alt="NGP Patna 13 logo" /></div>
         <div>
           <strong>CampusMate AI</strong>
@@ -156,7 +157,7 @@ function StudentLogin() {
 
   return (
     <main className="login-page">
-      <section className="login-brand" style={{ backgroundImage: `linear-gradient(rgba(19,35,29,.38), rgba(19,35,29,.38)), url(${ngpBackground})` }}>
+      <section className="login-brand" style={{ backgroundImage: `url(${ngpBackground})` }}>
         <div className="brand-mark"><img src={ngpLogo} alt="NGP Patna 13 logo" /></div>
         <div>
           <strong>CampusMate AI</strong>
@@ -332,7 +333,7 @@ function ChatPage() {
       </header>
 
       <section className="chat-card">
-        <div className="chat-messages" style={{ backgroundImage: `linear-gradient(rgba(248,252,249,.22), rgba(244,248,245,.22)), url(${ngpBackground})`, backgroundSize: 'cover', backgroundPosition: 'center', backgroundRepeat: 'no-repeat' }}>
+        <div className="chat-messages" style={{ backgroundImage: `url(${ngpBackground})`, backgroundSize: 'cover', backgroundPosition: 'center', backgroundRepeat: 'no-repeat' }}>
           {messages.map((item, index) => (
             <div className={`chat-row ${item.role}`} key={`${item.role}-${index}`}>
               <div className="chat-bubble">
