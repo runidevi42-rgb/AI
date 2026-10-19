@@ -20,6 +20,9 @@ describe('chatbot language understanding', () => {
     ['Mera next exam kab hai?', 'EXAM'],
     ['Koi assignment pending hai?', 'ASSIGNMENT'],
     ['Koi new notice hai?', 'NOTICE'],
+    ['Show latest college notices', 'NOTICE'],
+    ['What is the next event?', 'EVENT'],
+    ['Show upcoming holidays', 'EVENT'],
   ])('routes %s to %s', (query, intent) => expect(detectChatbotIntent(query)).toBe(intent));
 });
 

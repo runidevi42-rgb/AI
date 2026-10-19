@@ -291,7 +291,7 @@ function isMissingRelation(error: { code?: string } | null | undefined) {
   return error?.code === 'PGRST205' || error?.code === '42P01';
 }
 
-export async function fetchCompleteStructuredAnswer(student: StudentProfile, intent: 'ATTENDANCE' | 'TIMETABLE' | 'LUNCH_BREAK' | 'ASSIGNMENT' | 'EXAM' | 'NOTICE' | 'EMERGENCY_CONTACT' | 'FACULTY_CONTACT', query = '') {
+export async function fetchCompleteStructuredAnswer(student: StudentProfile, intent: 'ATTENDANCE' | 'TIMETABLE' | 'LUNCH_BREAK' | 'ASSIGNMENT' | 'EXAM' | 'NOTICE' | 'EVENT' | 'EMERGENCY_CONTACT' | 'FACULTY_CONTACT', query = '') {
   const q = query.toLowerCase();
   const now = new Date();
   const collegeNow = getCurrentCollegeDateTime(now);
@@ -370,7 +370,19 @@ export async function fetchCompleteStructuredAnswer(student: StudentProfile, int
     const result = await queryBuilder.limit(!full && /next|upcoming|kab/.test(q) ? 1 : 50);
     if (result.error) throw result.error;
     const rows = result.data ?? [];
-    return rows.length ? rows.map((row) => `- ${row.subject || row.title} - ${row.exam_date} ${displayTime(row.start_time)}-${displayTime(row.end_time)}${row.instructions ? `\n  ${row.instructions}` : ''}`).join('\n') : NO_INFORMATION_REPLY;
+    if (rows.length) return rows.map((row) => `- ${row.subject || row.title} - ${row.exam_date} ${displayTime(row.start_time)}-${displayTime(row.end_time)}${row.instructions ? `\n  ${row.instructions}` : ''}`).join('\n');
+    const relatedSchedule = await findRelatedKnowledgeAnswer(query, 1);
+    return relatedSchedule || NO_INFORMATION_REPLY;
+  }
+  if (intent === 'EVENT') {
+    const result = await supabase.from('events').select('title,description,start_at,end_at,venue,event_type').gte('end_at', now.toISOString()).order('start_at', { ascending: true }).limit(1);
+    if (result.error) throw result.error;
+    const event = result.data?.[0];
+    if (!event) return NO_INFORMATION_REPLY;
+    const date = new Intl.DateTimeFormat('en-IN', { dateStyle: 'long', timeZone: config.COLLEGE_TIMEZONE }).format(new Date(event.start_at));
+    const endDate = new Intl.DateTimeFormat('en-IN', { dateStyle: 'long', timeZone: config.COLLEGE_TIMEZONE }).format(new Date(event.end_at));
+    const dateText = date === endDate ? date : `${date} to ${endDate}`;
+    return `Your next event is ${event.title} on ${dateText}.${event.description ? `\n${event.description}` : ''}`;
   }
   if (intent === 'NOTICE') {
     const result = await supabase.from('notices').select('title,content,category,published_at,expires_at,priority').lte('published_at', now.toISOString()).or(`expires_at.is.null,expires_at.gte.${now.toISOString()}`).order('published_at', { ascending: false }).limit(full ? 50 : 8);
@@ -411,6 +423,39 @@ export async function fetchGeneralCollegeAnswer() {
   if (faqError) throw faqError;
   const records = [...(info ?? []), ...(faqs ?? [])];
   return records.length ? records.map((r: any) => r.title ? `• ${r.title}: ${r.content}` : `• ${r.question}: ${r.answer}`).join('\n') : NO_INFORMATION_REPLY;
+}
+
+const RELATED_STOP_WORDS = new Set(['what', 'where', 'when', 'which', 'how', 'the', 'is', 'are', 'my', 'our', 'for', 'and', 'about', 'please', 'tell', 'show', 'give', 'can', 'you', 'me', 'any', 'there', 'college', 'campus']);
+const relatedTokens = (value: string) => value.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter((token) => token.length > 2 && !RELATED_STOP_WORDS.has(token));
+
+/** Returns only verified Supabase records with meaningful query-word overlap. */
+export async function findRelatedKnowledgeAnswer(query: string, limit = 5) {
+  const queryTokens = new Set(relatedTokens(query));
+  if (!queryTokens.size) return null;
+  const [{ data: info, error: infoError }, { data: faqs, error: faqError }, { data: notices, error: noticeError }, { data: events, error: eventError }] = await Promise.all([
+    supabase.from('college_info').select('title,content,category').limit(100),
+    supabase.from('faqs').select('question,answer,category').limit(100),
+    supabase.from('notices').select('title,content,category').limit(100),
+    supabase.from('events').select('title,description,event_type').limit(100),
+  ]);
+  if (infoError) throw infoError;
+  if (faqError) throw faqError;
+  if (noticeError) throw noticeError;
+  if (eventError) throw eventError;
+  const candidates = [
+    ...(info ?? []).map((row) => ({ title: row.title, body: row.content, category: row.category })),
+    ...(faqs ?? []).map((row) => ({ title: row.question, body: row.answer, category: row.category })),
+    ...(notices ?? []).map((row) => ({ title: row.title, body: row.content, category: row.category })),
+    ...(events ?? []).map((row) => ({ title: row.title, body: row.description, category: row.event_type })),
+  ];
+  const matches = candidates.map((candidate) => {
+    const titleTokens = new Set(relatedTokens(String(candidate.title ?? '')));
+    const bodyTokens = new Set(relatedTokens(String(candidate.body ?? '')));
+    const score = [...queryTokens].reduce((total, token) => total + (titleTokens.has(token) ? 3 : bodyTokens.has(token) ? 1 : 0), 0);
+    return { candidate, score };
+  }).filter((match) => match.score >= 2).sort((a, b) => b.score - a.score).slice(0, limit);
+  if (!matches.length) return null;
+  return matches.map(({ candidate }) => `• ${candidate.title}${candidate.category ? ` [${candidate.category}]` : ''}${candidate.body ? `\n${candidate.body}` : ''}`).join('\n');
 }
 
 function compact(data: unknown) {

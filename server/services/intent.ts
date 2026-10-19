@@ -1,6 +1,6 @@
 export type ChatbotIntent =
   | 'GREETING' | 'THANKS' | 'GOODBYE' | 'CAPABILITIES' | 'ATTENDANCE' | 'TIMETABLE' | 'ASSIGNMENT' | 'EXAM'
-  | 'LUNCH_BREAK' | 'NOTICE' | 'EMERGENCY_CONTACT' | 'FACULTY_CONTACT' | 'GENERAL_COLLEGE' | 'STUDY_AI' | 'UNKNOWN';
+  | 'LUNCH_BREAK' | 'NOTICE' | 'EVENT' | 'EMERGENCY_CONTACT' | 'FACULTY_CONTACT' | 'GENERAL_COLLEGE' | 'STUDY_AI' | 'UNKNOWN';
 
 export function detectChatbotIntent(input: string): ChatbotIntent {
   const q = input.toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9\s?]/g, ' ');
@@ -13,7 +13,8 @@ export function detectChatbotIntent(input: string): ChatbotIntent {
   if (/\b(next class|next lecture|next period|what do i have next|which class.*next|after this class|agla class|next\s+class|next\s+lecture|next\s+period|timetable|time table|class|classes|lecture|schedule|aaj.*(class|timetable|schedule)|mera timetable|meri next class|aaj next class)\b/.test(q)) return 'TIMETABLE';
   if (/\b(assignment|homework|submission|deadline|pending.*assignment|koi assignment)\b/.test(q)) return 'ASSIGNMENT';
   if (/\b(exam|examination|test|assessment|hall ticket|next exam|mera exam|exam kab)\b/.test(q)) return 'EXAM';
-  if (/\b(notice|announcement|circular|latest update|new update|koi new notice|naya notice)\b/.test(q)) return 'NOTICE';
+  if (/\b(notices?|announcements?|circulars?|latest update|new update|koi new notices?|naya notices?)\b/.test(q)) return 'NOTICE';
+  if (/\b(next event|upcoming event|what(?:'s| is) next event|which event is next|holiday|holidays|upcoming holiday|next holiday|agla event|aane wala event)\b/.test(q)) return 'EVENT';
   if (/\b(emergency|ambulance|police|fire|security|ragging|important contact|emergency contact|emergency number|administration.*emergency)\b/.test(q)) return 'EMERGENCY_CONTACT';
   if (/\b(faculty|teacher|professor|lecturer|hod|who teaches|teacher.*contact|faculty.*contact|contact.*teacher)\b/.test(q)) return 'FACULTY_CONTACT';
   if (/\b(explain|define|what is|how does|difference between|solve|what are)\b/.test(q)) return 'STUDY_AI';

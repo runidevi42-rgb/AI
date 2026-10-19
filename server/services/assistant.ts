@@ -2,7 +2,7 @@ import Groq from 'groq-sdk';
 import { config } from '../config.js';
 import { logger } from '../lib/logger.js';
 import { supabase } from '../lib/supabase.js';
-import { buildProfileResponse, detectProfileIntent, fetchCompleteStructuredAnswer, fetchGeneralCollegeAnswer, findStudent, UNREGISTERED_REPLY, type StudentProfile } from './knowledge.js';
+import { buildProfileResponse, detectProfileIntent, fetchCompleteStructuredAnswer, fetchGeneralCollegeAnswer, findRelatedKnowledgeAnswer, findStudent, UNREGISTERED_REPLY, type StudentProfile } from './knowledge.js';
 import { detectChatbotIntent, type ChatbotIntent } from './intent.js';
 import { normalizePhone } from './whatsapp.js';
 
@@ -105,7 +105,7 @@ export async function answerStudentProfile(student: StudentProfile, message: str
     const previous = await supabase.from('message_logs').select('message,metadata').eq('student_id', student.student_id).eq('channel', channel === 'web' ? 'web_push' : channel).eq('metadata->>session_id', sessionId).eq('direction', 'inbound').order('created_at', { ascending: false }).limit(1).maybeSingle();
     if (previous.data?.message) dataQuery = `${previous.data.message} ${message}`;
     const priorIntent = previous.data?.metadata && typeof previous.data.metadata === 'object' && 'intent' in previous.data.metadata ? String((previous.data.metadata as Record<string, unknown>).intent) : '';
-    if (['ATTENDANCE', 'TIMETABLE', 'LUNCH_BREAK', 'ASSIGNMENT', 'EXAM', 'NOTICE', 'EMERGENCY_CONTACT', 'FACULTY_CONTACT'].includes(priorIntent)) intent = priorIntent as ChatbotIntent;
+    if (['ATTENDANCE', 'TIMETABLE', 'LUNCH_BREAK', 'ASSIGNMENT', 'EXAM', 'NOTICE', 'EVENT', 'EMERGENCY_CONTACT', 'FACULTY_CONTACT'].includes(priorIntent)) intent = priorIntent as ChatbotIntent;
   }
   if (intent === 'GREETING') {
     const text = `Hello ${student.full_name} 👋\nWelcome to the College AI Assistant. How can I help you today?`;
@@ -134,7 +134,8 @@ export async function answerStudentProfile(student: StudentProfile, message: str
   }
   if (intent === 'GENERAL_COLLEGE') {
     try {
-      const text = await fetchGeneralCollegeAnswer();
+      const related = await findRelatedKnowledgeAnswer(message);
+      const text = related || await fetchGeneralCollegeAnswer();
       await logConversation(phone, student.student_id, message, text, intent, sessionId, channel, messageId);
       return { authenticated: true, text, studentId: student.student_id, intent };
     } catch (error) {
@@ -142,9 +143,9 @@ export async function answerStudentProfile(student: StudentProfile, message: str
       return { authenticated: true, text: DB_FAILURE_REPLY, studentId: student.student_id, intent };
     }
   }
-  if (['ATTENDANCE', 'TIMETABLE', 'LUNCH_BREAK', 'ASSIGNMENT', 'EXAM', 'NOTICE', 'EMERGENCY_CONTACT', 'FACULTY_CONTACT'].includes(intent)) {
+  if (['ATTENDANCE', 'TIMETABLE', 'LUNCH_BREAK', 'ASSIGNMENT', 'EXAM', 'NOTICE', 'EVENT', 'EMERGENCY_CONTACT', 'FACULTY_CONTACT'].includes(intent)) {
     try {
-      const text = await fetchCompleteStructuredAnswer(student, intent as 'ATTENDANCE' | 'TIMETABLE' | 'LUNCH_BREAK' | 'ASSIGNMENT' | 'EXAM' | 'NOTICE' | 'EMERGENCY_CONTACT' | 'FACULTY_CONTACT', dataQuery);
+      const text = await fetchCompleteStructuredAnswer(student, intent as 'ATTENDANCE' | 'TIMETABLE' | 'LUNCH_BREAK' | 'ASSIGNMENT' | 'EXAM' | 'NOTICE' | 'EVENT' | 'EMERGENCY_CONTACT' | 'FACULTY_CONTACT', dataQuery);
       await logConversation(phone, student.student_id, message, text, intent, sessionId, channel, messageId);
       return { authenticated: true, text, studentId: student.student_id, intent };
     } catch (error) {
@@ -152,7 +153,16 @@ export async function answerStudentProfile(student: StudentProfile, message: str
       return { authenticated: true, text: DB_FAILURE_REPLY, studentId: student.student_id, intent };
     }
   }
-  const text = await answerWithAI(message, student, sessionId);
+  let text: string;
+  if (intent === 'UNKNOWN') {
+    try {
+      const related = await findRelatedKnowledgeAnswer(message);
+      text = related || await answerWithAI(message, student, sessionId);
+    } catch (error) {
+      logger.warn({ err: error, studentId: student.student_id }, 'Related knowledge lookup failed; continuing with AI response');
+      text = await answerWithAI(message, student, sessionId);
+    }
+  } else text = await answerWithAI(message, student, sessionId);
   await logConversation(phone, student.student_id, message, text, intent, sessionId, channel, messageId);
   return { authenticated: true, text, studentId: student.student_id, intent };
 }
