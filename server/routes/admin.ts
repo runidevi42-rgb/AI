@@ -349,11 +349,18 @@ adminRouter.post('/:resource', asyncHandler(async (req, res) => {
     }
   }
 
-  const { data, error } = await supabase
+  let { data, error } = await supabase
     .from(table)
     .insert(payload)
     .select()
     .single();
+
+  if (table === 'faculty' && error && ['PGRST204', '42703'].includes(error.code ?? '') && /subjects/i.test(error.message)) {
+    if (payload.subjects) throw new AppError(503, 'Faculty subjects are unavailable until the database update is applied.');
+    const compatiblePayload = { ...payload };
+    delete compatiblePayload.subjects;
+    ({ data, error } = await supabase.from(table).insert(compatiblePayload).select().single());
+  }
 
   if (error) {
     console.error(`Insert error for ${table}:`, error);
@@ -379,7 +386,13 @@ adminRouter.put('/:resource/:id', asyncHandler(async (req, res) => {
   delete changes.created_at;
   delete changes.updated_at;
   const payload = table === 'students' ? changes : { ...changes, updated_at: new Date().toISOString() };
-  const { data, error } = await supabase.from(table).update(payload).eq(primaryKey, req.params.id).select().single();
+  let { data, error } = await supabase.from(table).update(payload).eq(primaryKey, req.params.id).select().single();
+  if (table === 'faculty' && error && ['PGRST204', '42703'].includes(error.code ?? '') && /subjects/i.test(error.message)) {
+    if (payload.subjects) throw new AppError(503, 'Faculty subjects are unavailable until the database update is applied.');
+    const compatiblePayload = { ...payload };
+    delete compatiblePayload.subjects;
+    ({ data, error } = await supabase.from(table).update(compatiblePayload).eq(primaryKey, req.params.id).select().single());
+  }
   if (error) throw new AppError(400, error.message);
   if (table === 'timetables') void notifyTimetableChange(data).catch((err) => logger.error({ err }, 'Timetable update notification failed'));
   res.json(data);
