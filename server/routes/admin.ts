@@ -8,6 +8,7 @@ import { requireAdmin } from '../middleware/auth.js';
 import { dispatchNotification, notifyTimetableChange } from '../services/notifications.js';
 import { timetableSchema, validatedPayload } from './admin-validation.js';
 import { interpretAdminPrompt } from '../services/admin-prompt.js';
+import { attendanceEntrySchema } from '../services/attendance-entry.js';
 
 export const adminRouter = Router();
 adminRouter.use(requireAdmin);
@@ -173,8 +174,6 @@ adminRouter.post('/confirm-changes', asyncHandler(async (req, res) => {
 }));
 
 
-const attendanceEntrySchema = z.object({ student_id: z.coerce.number().int().positive(), student_name: z.string().trim().min(1), attendance_percentage: z.coerce.number().finite().min(0).max(100) });
-
 adminRouter.get('/attendance', asyncHandler(async (req, res) => {
   const { page, pageSize, search } = z.object({ page: z.coerce.number().int().min(1).default(1), pageSize: z.coerce.number().int().min(1).max(100).default(20), search: z.string().default('') }).parse(req.query);
   let query = supabase.from('attendance_percentages').select('id,student_id,attendance_percentage,students!inner(full_name)', { count: 'exact' });
@@ -185,12 +184,16 @@ adminRouter.get('/attendance', asyncHandler(async (req, res) => {
 }));
 
 async function saveAttendance(input: unknown, id?: string) {
-  const entry = attendanceEntrySchema.parse(input);
+  const parsed = attendanceEntrySchema.safeParse(input);
+  if (!parsed.success) throw new AppError(400, parsed.error.issues[0]?.message ?? 'Invalid attendance entry');
+  const entry = parsed.data;
   const student = await supabase.from('students').select('student_id,full_name').eq('student_id', entry.student_id).maybeSingle();
   if (student.error) throw student.error;
-  if (!student.data || student.data.full_name.trim().toLowerCase() !== entry.student_name.trim().toLowerCase()) throw new AppError(400, 'Student ID and name do not match a registered student');
+  if (!student.data) throw new AppError(400, 'Student ID was not found. Check the complete ID from your PDF.');
+  if (student.data.full_name.trim().toLowerCase() !== entry.student_name.trim().toLowerCase()) throw new AppError(400, 'Student name does not match the registered name for this ID.');
   const payload = { student_id: entry.student_id, attendance_percentage: entry.attendance_percentage, updated_at: new Date().toISOString() };
   const result = id ? await supabase.from('attendance_percentages').update(payload).eq('id', id).select().single() : await supabase.from('attendance_percentages').insert(payload).select().single();
+  if (result.error?.code === '23505') throw new AppError(409, 'An attendance record already exists for this student. Edit the existing record.');
   if (result.error) throw result.error;
   return result.data;
 }

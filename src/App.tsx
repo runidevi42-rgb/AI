@@ -1472,7 +1472,7 @@ function FormField({ field, value }: { field: Field; value: unknown }) {
               {field.options?.map((o) => <option key={o}>{o}</option>)}
             </select>
           ) : (
-            <input name={field.name} type={field.type ?? 'text'} defaultValue={String(val)} required={field.required} min={field.name === 'attendance_percentage' ? 0 : undefined} max={field.name === 'attendance_percentage' ? 100 : undefined} step={field.name === 'attendance_percentage' ? 'any' : undefined} />
+            <input name={field.name} type={field.type ?? 'text'} defaultValue={String(val)} required={field.required} min={field.name === 'attendance_percentage' ? 0 : undefined} max={field.name === 'attendance_percentage' ? 100 : undefined} step={field.name === 'attendance_percentage' ? '0.01' : undefined} />
           )}
         </>
       )}
