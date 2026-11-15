@@ -1191,6 +1191,7 @@ function ResourcePage() {
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState<Record<string, unknown> | null | undefined>(undefined);
+  const [importOpen, setImportOpen] = useState(false);
 
   const load = () => {
     if (!config) return;
@@ -1229,6 +1230,7 @@ function ResourcePage() {
           <Plus size={18} />Add {config.singular.toLowerCase()}
         </button>
       </div>
+      {config.key === 'attendance' && <><button className="secondary" type="button" onClick={() => setImportOpen(true)}>Import attendance list</button>{importOpen && <AttendanceImport close={() => setImportOpen(false)} saved={load} />}</>}
       <section className="table-panel">
         <div className="table-tools">
           <div className="search">
@@ -1280,6 +1282,40 @@ function ResourcePage() {
       )}
     </>
   );
+}
+
+type AttendanceImportRow = { student_id: string; student_name: string; attendance_percentage: string; reason?: string };
+function AttendanceImport({ close, saved }: { close: () => void; saved: () => void }) {
+  const [input, setInput] = useState('');
+  const [preview, setPreview] = useState<{ accepted: AttendanceImportRow[]; skipped: AttendanceImportRow[] } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState<{ saved: number; skipped: AttendanceImportRow[] } | null>(null);
+  function parseRows() {
+    return input.split(/\r?\n/).map((line) => line.trim()).filter(Boolean).map((line) => {
+      const parts = line.startsWith('|') ? line.split('|').slice(1, -1) : line.includes('\t') ? line.split('\t') : line.split(',');
+      return parts.map((part) => part.trim());
+    }).filter((parts) => !/^student\s*id$/i.test(parts[0] ?? '') && !parts.every((part) => /^[-: ]*$/.test(part))).map((parts) => ({ student_id: parts[0] ?? '', student_name: parts[1] ?? '', attendance_percentage: parts[2] ?? '' }));
+  }
+  async function check() {
+    setBusy(true); setResult(null);
+    try { setPreview(await api('/admin/attendance/import/preview', { method: 'POST', body: JSON.stringify({ rows: parseRows() }) })); }
+    catch (error) { toast.error(error instanceof Error ? error.message : 'Unable to preview'); }
+    finally { setBusy(false); }
+  }
+  async function confirmImport() {
+    setBusy(true);
+    try { const response = await api<{ saved: number; skipped: AttendanceImportRow[] }>('/admin/attendance/import/confirm', { method: 'POST', body: JSON.stringify({ rows: parseRows() }) }); setResult(response); setPreview(null); saved(); }
+    catch (error) { toast.error(error instanceof Error ? error.message : 'Unable to save attendance'); }
+    finally { setBusy(false); }
+  }
+  return <div className="modal-backdrop"><section className="modal"><div className="modal-head"><h2>Import attendance</h2><button className="icon" type="button" aria-label="Close" onClick={close}><X /></button></div><div style={{ padding: 22 }}>
+    <p>Paste rows or upload a CSV or text file with Student ID, Student Name, Attendance (%). IDs must match exactly.</p>
+    <input type="file" accept=".csv,.txt,text/csv,text/plain" aria-label="Upload attendance list" onChange={(event) => { const file = event.target.files?.[0]; if (file) void file.text().then((text) => { setInput(text); setPreview(null); setResult(null); }).catch(() => toast.error('Unable to read file')); }} />
+    <textarea className="prompt-textarea" aria-label="Attendance list" value={input} onChange={(event) => { setInput(event.target.value); setPreview(null); setResult(null); }} placeholder={'Student ID, Student Name, Attendance (%)\n48, Sumit Kumar, 78'} />
+    <button className="secondary" type="button" disabled={busy || !input.trim()} onClick={() => void check()}>Preview</button>
+    {preview && <><p>{preview.accepted.length} ready to save; {preview.skipped.length} skipped.</p><div className="table-wrap"><table><thead><tr><th>Student ID</th><th>Student Name</th><th>Attendance (%)</th><th>Result</th></tr></thead><tbody>{[...preview.accepted, ...preview.skipped].map((row, index) => <tr key={index}><td>{row.student_id}</td><td>{row.student_name}</td><td>{row.attendance_percentage}</td><td>{row.reason || 'Ready to save'}</td></tr>)}</tbody></table></div><button className="primary" type="button" disabled={busy || !preview.accepted.length} onClick={() => void confirmImport()}>Confirm and save {preview.accepted.length}</button></>}
+    {result && <><p>Saved {result.saved}; skipped {result.skipped.length}.</p>{result.skipped.map((row, index) => <p key={index}>{row.student_id} — {row.student_name}: {row.reason}</p>)}</>}
+  </div></section></div>;
 }
 
 function EmergencyContactsPage() {

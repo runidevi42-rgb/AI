@@ -9,6 +9,7 @@ import { dispatchNotification, notifyTimetableChange } from '../services/notific
 import { timetableSchema, validatedPayload } from './admin-validation.js';
 import { interpretAdminPrompt } from '../services/admin-prompt.js';
 import { attendanceEntrySchema } from '../services/attendance-entry.js';
+import { matchAttendanceRows, type ImportRow } from '../services/attendance-import.js';
 
 export const adminRouter = Router();
 adminRouter.use(requireAdmin);
@@ -173,6 +174,28 @@ adminRouter.post('/confirm-changes', asyncHandler(async (req, res) => {
   }
 }));
 
+
+const importRowsSchema = z.object({ rows: z.array(z.object({ student_id: z.string().max(100), student_name: z.string().max(200), attendance_percentage: z.string().max(30) })).min(1).max(1000) });
+async function checkImport(rows: ImportRow[]) {
+  const ids = [...new Set(rows.map((row) => row.student_id.trim()).filter((id) => /^[1-9]\d*$/.test(id) && BigInt(id) <= BigInt(Number.MAX_SAFE_INTEGER)))];
+  const students: { student_id: number; full_name: string }[] = [];
+  for (let i = 0; i < ids.length; i += 100) {
+    const result = await supabase.from('students').select('student_id,full_name').in('student_id', ids.slice(i, i + 100));
+    if (result.error) throw result.error;
+    students.push(...(result.data ?? []));
+  }
+  return matchAttendanceRows(rows, students);
+}
+adminRouter.post('/attendance/import/preview', asyncHandler(async (req, res) => res.json(await checkImport(importRowsSchema.parse(req.body).rows))));
+adminRouter.post('/attendance/import/confirm', asyncHandler(async (req, res) => {
+  const result = await checkImport(importRowsSchema.parse(req.body).rows);
+  if (result.accepted.length) {
+    const records = result.accepted.map((row) => ({ student_id: row.student_id.trim(), attendance_percentage: Number(row.attendance_percentage.trim().replace(/%$/, '')), updated_at: new Date().toISOString() }));
+    const saved = await supabase.from('attendance_percentages').upsert(records, { onConflict: 'student_id' });
+    if (saved.error) throw saved.error;
+  }
+  return res.json({ saved: result.accepted.length, skipped: result.skipped });
+}));
 
 adminRouter.get('/attendance', asyncHandler(async (req, res) => {
   const { page, pageSize, search } = z.object({ page: z.coerce.number().int().min(1).default(1), pageSize: z.coerce.number().int().min(1).max(100).default(20), search: z.string().default('') }).parse(req.query);
