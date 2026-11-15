@@ -1500,8 +1500,7 @@ function Notifications() {
     try {
       if (timing === 'later' && !raw.scheduled_at) throw new Error('Choose a date and time for the scheduled notification');
       const scheduledAt = timing === 'later' ? new Date(String(raw.scheduled_at)).toISOString() : null;
-      const studentIds = String(raw.student_ids ?? '').split(',').map((v) => Number(v.trim())).filter((v) => Number.isSafeInteger(v) && v > 0);
-      const payload = { ...raw, delivery_channel: channel, semester: raw.semester ? Number(raw.semester) : null, student_ids: studentIds, scheduled_at: scheduledAt };
+      const payload = { ...raw, delivery_channel: channel, scheduled_at: scheduledAt };
       const created = await api<{ id: string; status: string }>('/admin/notifications', { method: 'POST', body: JSON.stringify(payload) });
       if (created.status !== 'scheduled') await api(`/admin/notifications/${created.id}/send`, { method: 'POST' });
       setSent(true);
@@ -1543,10 +1542,7 @@ function Notifications() {
                 <label><span>Delivery channel</span><select name="delivery_channel" value={channel} onChange={(e) => setChannel(e.target.value)}><option value="web_push">Free Web Push</option><option value="whatsapp">WhatsApp template</option><option value="both">Both channels</option></select></label>
                 <label><span>Delivery time</span><select name="delivery_timing" value={timing} onChange={(e) => setTiming(e.target.value)}><option value="now">Send now</option><option value="later">Schedule for later</option></select></label>
                 <label><span>Category</span><select name="type"><option>notice</option><option>academic</option><option>emergency</option><option>event</option><option>reminder</option></select></label>
-                <label><span>Audience</span><select name="audience"><option value="all">All consented students</option><option value="segment">Class segment</option><option value="selected">Selected student IDs</option></select></label>
-                <label><span>Department (optional)</span><input name="department" placeholder="e.g. Computer Science" /></label>
-                <label><span>Semester (optional)</span><input name="semester" type="number" min="1" max="12" /></label>
-                <label className="span"><span>Selected student IDs (comma separated)</span><input name="student_ids" placeholder="101, 102, 103" /></label>
+                <label><span>Audience</span><select name="audience"><option value="all">All consented students</option></select></label>
                 {timing === 'later' && <label className="span"><span>Schedule date and time <em>*</em></span><input name="scheduled_at" type="datetime-local" required /></label>}
               </div>
               <div className="modal-actions">
