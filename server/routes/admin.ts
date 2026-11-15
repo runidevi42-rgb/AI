@@ -173,6 +173,35 @@ adminRouter.post('/confirm-changes', asyncHandler(async (req, res) => {
 }));
 
 
+const attendanceEntrySchema = z.object({ student_id: z.coerce.number().int().positive(), student_name: z.string().trim().min(1), attendance_percentage: z.coerce.number().finite().min(0).max(100) });
+
+adminRouter.get('/attendance', asyncHandler(async (req, res) => {
+  const { page, pageSize, search } = z.object({ page: z.coerce.number().int().min(1).default(1), pageSize: z.coerce.number().int().min(1).max(100).default(20), search: z.string().default('') }).parse(req.query);
+  let query = supabase.from('attendance_percentages').select('id,student_id,attendance_percentage,students!inner(full_name)', { count: 'exact' });
+  if (search.trim()) query = query.ilike('students.full_name', `%${search.trim().replace(/[%(),]/g, '')}%`);
+  const { data, error, count } = await query.order('created_at', { ascending: false }).range((page - 1) * pageSize, page * pageSize - 1);
+  if (error) throw error;
+  return res.json({ data: (data ?? []).map((row: any) => ({ ...row, student_name: row.students?.full_name })), total: count ?? 0, page, pageSize });
+}));
+
+async function saveAttendance(input: unknown, id?: string) {
+  const entry = attendanceEntrySchema.parse(input);
+  const student = await supabase.from('students').select('student_id,full_name').eq('student_id', entry.student_id).maybeSingle();
+  if (student.error) throw student.error;
+  if (!student.data || student.data.full_name.trim().toLowerCase() !== entry.student_name.trim().toLowerCase()) throw new AppError(400, 'Student ID and name do not match a registered student');
+  const payload = { student_id: entry.student_id, attendance_percentage: entry.attendance_percentage, updated_at: new Date().toISOString() };
+  const result = id ? await supabase.from('attendance_percentages').update(payload).eq('id', id).select().single() : await supabase.from('attendance_percentages').insert(payload).select().single();
+  if (result.error) throw result.error;
+  return result.data;
+}
+adminRouter.post('/attendance', asyncHandler(async (req, res) => res.status(201).json(await saveAttendance(req.body))));
+adminRouter.put('/attendance/:id', asyncHandler(async (req, res) => res.json(await saveAttendance(req.body, String(req.params.id)))));
+adminRouter.delete('/attendance/:id', asyncHandler(async (req, res) => {
+  const { error } = await supabase.from('attendance_percentages').delete().eq('id', req.params.id);
+  if (error) throw error;
+  return res.sendStatus(204);
+}));
+
 adminRouter.get('/:resource', asyncHandler(async (req, res) => {
   const table = resource(String(req.params.resource));
   const { page, pageSize, search } = z.object({ page: z.coerce.number().min(1).default(1), pageSize: z.coerce.number().min(1).max(100).default(20), search: z.string().optional() }).parse(req.query);

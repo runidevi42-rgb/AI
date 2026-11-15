@@ -234,6 +234,9 @@ export function formatTimetableAnswer(day: string, rows: any[], complete = false
 }
 
 async function getAttendancePercentage(studentId: string | number) {
+  const manual = await supabase.from('attendance_percentages').select('attendance_percentage').eq('student_id', studentId).maybeSingle();
+  if (manual.error && !isMissingRelation(manual.error)) throw manual.error;
+  if (manual.data) return Number(manual.data.attendance_percentage);
   const direct = await supabase.from('student_attendance_summary').select('student_id,attendance_percentage').eq('student_id', studentId).maybeSingle();
   if (!isMissingRelation(direct.error)) {
     if (direct.error) throw direct.error;

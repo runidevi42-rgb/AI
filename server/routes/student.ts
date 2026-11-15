@@ -51,7 +51,9 @@ studentRouter.get('/attendance', asyncHandler(async (req, res) => {
     total: acc.total + Number(r.total_classes || 0),
   }), { present: 0, total: 0 });
 
-  const overallPercentage = totals.total ? Math.round((totals.present / totals.total) * 100) : null;
+  const manual = await supabase.from('attendance_percentages').select('attendance_percentage').eq('student_id', student.student_id).maybeSingle();
+  if (manual.error && !['PGRST205', '42P01'].includes(manual.error.code ?? '')) throw manual.error;
+  const overallPercentage = manual.data ? Number(manual.data.attendance_percentage) : totals.total ? Math.round((totals.present / totals.total) * 100) : null;
 
   res.json({
     attendance: records,
