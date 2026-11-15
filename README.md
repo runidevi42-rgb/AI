@@ -1,6 +1,6 @@
 # CampusMate AI
 
-CampusMate AI is a single-repository React, Express, Supabase, Groq, and
+CampusMate AI is a single-repository React, Express, Supabase, OpenAI, and
 WhatsApp college assistant. One Node.js process serves the admin frontend,
 JSON API, WhatsApp webhook, health endpoints, and reminder scheduler.
 
@@ -83,8 +83,8 @@ All secrets are backend-only. Do not prefix a secret with `VITE_`.
 | `COLLEGE_TIMEZONE` | yes | Backend | Scheduler timezone |
 | `SUPABASE_URL` | yes | Backend | Supabase project URL |
 | `SUPABASE_SERVICE_ROLE_KEY` | yes | Backend secret | Privileged database access |
-| `GROQ_API_KEY` | yes | Backend secret | AI responses |
-| `GROQ_MODEL` | yes | Backend | Groq model name |
+| `OPENAI_API_KEY` | yes | Backend secret | OpenAI API responses |
+| `OPENAI_MODEL` | no | Backend | OpenAI model name; defaults to `gpt-4o-mini` |
 | `WHATSAPP_ACCESS_TOKEN` | yes | Backend secret | Meta API authorization |
 | `WHATSAPP_PHONE_NUMBER_ID` | yes | Backend | WhatsApp sender ID |
 | `WHATSAPP_VERIFY_TOKEN` | yes | Backend secret | Webhook verification |
@@ -107,7 +107,7 @@ All secrets are backend-only. Do not prefix a secret with `VITE_`.
 | `VITE_API_BASE_URL` | no | Browser-visible | Optional API origin; empty means same origin |
 | `LOG_LEVEL` | no | Backend | Pino log level |
 
-The browser never receives the Supabase service-role key, Groq key, Meta
+The browser never receives the Supabase service-role key, OpenAI key, Meta
 tokens, JWT secret, or admin credentials. The frontend API client defaults to
 same-origin requests. Set `VITE_API_BASE_URL` only when the frontend and API
 are deliberately deployed on different origins.
@@ -243,5 +243,5 @@ empty placeholders in `.env.example`.
 - Keep `.env` untracked and store production secrets in the hosting platform.
 - Use a bcrypt hash for `ADMIN_PASSWORD` in production.
 - Never place the service-role key or private tokens in `VITE_*` variables.
-- Rotate Supabase, Groq, Meta, and JWT credentials regularly.
+- Rotate Supabase, OpenAI, Meta, and JWT credentials regularly.
 - Review retention and deletion rules for `message_logs`.

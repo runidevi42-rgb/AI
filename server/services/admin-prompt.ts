@@ -1,10 +1,10 @@
-import Groq from 'groq-sdk';
+import OpenAI from 'openai';
 import { config } from '../config.js';
 import { logger } from '../lib/logger.js';
 import { supabase } from '../lib/supabase.js';
 import { getCurrentCollegeDateTime } from '../utils/college-time.js';
 
-const groq = new Groq({ apiKey: config.GROQ_API_KEY });
+const openai = new OpenAI({ apiKey: config.OPENAI_API_KEY });
 
 export interface ExtractedField {
   key: string;
@@ -81,7 +81,7 @@ Respond ONLY with valid JSON with this schema:
 }`;
 
 /**
- * Fallback deterministic extractor in case Groq is unavailable or fails.
+ * Fallback deterministic extractor in case OpenAI is unavailable or fails.
  */
 function fallbackInterpret(prompt: string, contextDate: { date: string; weekday: string }): {
   action: 'insert' | 'update' | 'delete' | 'clarification_needed';
@@ -329,8 +329,8 @@ Admin instruction: "${prompt.trim()}"`;
 
     let completion;
     try {
-      completion = await groq.chat.completions.create({
-        model: config.GROQ_MODEL || 'openai/gpt-oss-120b',
+      completion = await openai.chat.completions.create({
+        model: config.OPENAI_MODEL || 'gpt-4o-mini',
         temperature: 0.1,
         response_format: { type: 'json_object' },
         messages: [
@@ -340,9 +340,9 @@ Admin instruction: "${prompt.trim()}"`;
       }, { timeout: 3000 });
     } catch (apiErr) {
       const candidate = apiErr as { status?: number; error?: { code?: string } };
-      if ((candidate.status === 404 || candidate.error?.code === 'model_not_found') && config.GROQ_MODEL !== 'openai/gpt-oss-120b') {
-        completion = await groq.chat.completions.create({
-          model: 'openai/gpt-oss-120b',
+      if ((candidate.status === 404 || candidate.error?.code === 'model_not_found') && config.OPENAI_MODEL !== 'gpt-4o-mini') {
+        completion = await openai.chat.completions.create({
+          model: 'gpt-4o-mini',
           temperature: 0.1,
           response_format: { type: 'json_object' },
           messages: [

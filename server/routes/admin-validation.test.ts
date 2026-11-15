@@ -2,6 +2,12 @@ import { describe, expect, it } from 'vitest';
 import { timetableSchema, validatedPayload } from './admin-validation.js';
 
 describe('admin resource validation', () => {
+  it('accepts faculty details without email or office room and leaves them out of updates', () => {
+    const payload = validatedPayload('faculty', { full_name: 'Dr Rao', designation: 'Lecturer', department: 'Computer Science', phone: '1234567890' });
+    expect(payload).toMatchObject({ full_name: 'Dr Rao', designation: 'Lecturer', department: 'Computer Science', phone: '1234567890' });
+    expect(payload).not.toHaveProperty('email');
+    expect(payload).not.toHaveProperty('office_room');
+  });
   it('normalizes a regular timetable entry', () => {
     expect(timetableSchema.parse({ day_of_week: 'Monday', start_time: '09:00', end_time: '10:00', subject: 'DBMS', teacher: 'Dr. Rao', batch_group: 'CSE-5', is_recess: false })).toEqual({
       day_of_week: 'Monday', start_time: '09:00', end_time: '10:00', subject: 'DBMS', teacher: 'Dr. Rao', batch_group: 'CSE-5', is_recess: false,

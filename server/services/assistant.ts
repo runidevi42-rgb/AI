@@ -1,4 +1,4 @@
-import Groq from 'groq-sdk';
+import OpenAI from 'openai';
 import { config } from '../config.js';
 import { logger } from '../lib/logger.js';
 import { supabase } from '../lib/supabase.js';
@@ -6,7 +6,7 @@ import { buildProfileResponse, detectProfileIntent, fetchCompleteStructuredAnswe
 import { detectChatbotIntent, type ChatbotIntent } from './intent.js';
 import { normalizePhone } from './whatsapp.js';
 
-const groq = new Groq({ apiKey: config.GROQ_API_KEY });
+const openai = new OpenAI({ apiKey: config.OPENAI_API_KEY });
 const AI_FAILURE_REPLY = 'I am temporarily unable to process this question. Please try again.';
 const DB_FAILURE_REPLY = 'The college database is temporarily unavailable. Please try again later.';
 
@@ -51,12 +51,12 @@ async function answerWithAI(message: string, student: StudentProfile, sessionId?
     ];
     let completion;
     try {
-      completion = await groq.chat.completions.create({ model: config.GROQ_MODEL || 'openai/gpt-oss-120b', temperature: 0.1, max_tokens: 300, messages });
+      completion = await openai.chat.completions.create({ model: config.OPENAI_MODEL || 'gpt-4o-mini', temperature: 0.1, max_tokens: 300, messages });
     } catch (error) {
       const candidate = error as { status?: number; error?: { code?: string } };
-      if ((candidate.status === 404 || candidate.error?.code === 'model_not_found') && config.GROQ_MODEL !== 'openai/gpt-oss-120b') {
-        logger.warn({ configuredModel: config.GROQ_MODEL, fallbackModel: 'openai/gpt-oss-120b' }, 'Configured Groq model unavailable; retrying with fallback');
-        completion = await groq.chat.completions.create({ model: 'openai/gpt-oss-120b', temperature: 0.1, max_tokens: 300, messages });
+      if ((candidate.status === 404 || candidate.error?.code === 'model_not_found') && config.OPENAI_MODEL !== 'gpt-4o-mini') {
+        logger.warn({ configuredModel: config.OPENAI_MODEL, fallbackModel: 'gpt-4o-mini' }, 'Configured OpenAI model unavailable; retrying with fallback');
+        completion = await openai.chat.completions.create({ model: 'gpt-4o-mini', temperature: 0.1, max_tokens: 300, messages });
       } else throw error;
     }
     return completion.choices[0]?.message?.content?.trim() || AI_FAILURE_REPLY;
@@ -66,12 +66,12 @@ async function answerWithAI(message: string, student: StudentProfile, sessionId?
       const body = candidate.error ?? candidate.response?.data;
       logger.error({
         httpStatus: candidate.status ?? candidate.response?.status,
-        errorMessage: candidate.message ?? 'Unknown Groq error',
+        errorMessage: candidate.message ?? 'Unknown OpenAI error',
         responseBody: typeof body === 'string' ? body.slice(0, 1000) : body,
         studentId: student.student_id,
-      }, 'Groq response failed (development diagnostic)');
+      }, 'OpenAI response failed (development diagnostic)');
     } else {
-      logger.error({ studentId: student.student_id }, 'Groq response failed');
+      logger.error({ studentId: student.student_id }, 'OpenAI response failed');
     }
     return AI_FAILURE_REPLY;
   }
