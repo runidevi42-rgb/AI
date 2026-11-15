@@ -47,22 +47,7 @@ authRouter.post('/student-login', asyncHandler(async (req, res) => {
     .eq('student_id', input.student_id)
     .in('whatsapp_number', candidates);
 
-  let { data, error } = await query.maybeSingle();
-
-  // If not found and input.student_id is all digits, also try matching with numeric representation
-  if (!data && /^\d+$/.test(input.student_id)) {
-    const numId = Number(input.student_id);
-    const retry = await supabase
-      .from('students')
-      .select('student_id,full_name,whatsapp_number,department,course,semester')
-      .eq('student_id', numId)
-      .in('whatsapp_number', candidates)
-      .maybeSingle();
-    if (!retry.error && retry.data) {
-      data = retry.data;
-      error = null;
-    }
-  }
+  const { data, error } = await query.maybeSingle();
 
   if (error) {
     logger.error({ message: error.message, code: error.code, details: error.details, hint: error.hint }, 'Student authentication Supabase lookup failed');

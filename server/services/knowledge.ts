@@ -105,9 +105,6 @@ export async function findStudentById(studentId: string | number) {
   const baseSelect = 'student_id,full_name,whatsapp_number,roll_number,department,course,semester';
   let result = await supabase.from('students').select(`${baseSelect},section,batch_group`).eq('student_id', studentId).maybeSingle();
   if (result.error?.code === '42703') result = await supabase.from('students').select(baseSelect).eq('student_id', studentId).maybeSingle();
-  if (!result.data && typeof studentId === 'string' && /^\d+$/.test(studentId)) {
-    result = await supabase.from('students').select(`${baseSelect},section,batch_group`).eq('student_id', Number(studentId)).maybeSingle();
-  }
   const { data, error } = result;
   if (error) throw error;
   return data as StudentProfile | null;
@@ -303,7 +300,7 @@ export async function fetchCompleteStructuredAnswer(student: StudentProfile, int
   const full = /\b(full|all|complete|entire|subject wise|subject-wise)\b/.test(q);
   if (intent === 'ATTENDANCE') {
     const attendance = await getAttendancePercentage(student.student_id);
-    return attendance === null ? NO_INFORMATION_REPLY : `Your current attendance is ${attendance}%.`;
+    return attendance === null ? 'Your attendance is not available in the college database.' : `Your current attendance is ${attendance}%.`;
   }
   if (intent === 'LUNCH_BREAK') {
     const requestedDay = requestedWeekday(q);
