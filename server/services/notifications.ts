@@ -25,8 +25,16 @@ export async function dispatchNotification(notificationId: string) {
   if (studentError) throw studentError;
 
   const recipients = (students ?? []) as NotificationRecipient[];
+  const subscribed = new Set<string>();
+  if (channels.includes('web_push')) {
+    for (const recipient of recipients.filter((student) => isEligible(student, 'web_push'))) {
+      const result = await supabase.from('web_push_subscriptions').select('id').eq('student_id', recipient.student_id).eq('active', true).limit(1);
+      if (result.error) throw result.error;
+      if (result.data?.length) subscribed.add(String(recipient.student_id));
+    }
+  }
   const attempts: DeliveryAttempt[] = recipients.flatMap((recipient) => channels
-    .filter((channel) => isEligible(recipient, channel))
+    .filter((channel) => isEligible(recipient, channel) && (channel !== 'web_push' || subscribed.has(String(recipient.student_id))))
     .map((channel) => ({ recipient, channel })));
   const targetedStudents = new Set(attempts.map((attempt) => attempt.recipient.student_id)).size;
 

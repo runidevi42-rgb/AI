@@ -26,6 +26,46 @@ function ThemeProvider({ children }: { children: ReactNode }) {
   return <ThemeContext.Provider value={{ theme, toggle: () => setTheme((value) => value === 'dark' ? 'light' : 'dark') }}>{children}</ThemeContext.Provider>;
 }
 
+function BrowserNotifications() {
+  const [enabled, setEnabled] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  useEffect(() => {
+    if (!('serviceWorker' in navigator) || !('PushManager' in window)) return;
+    void navigator.serviceWorker.getRegistration('/').then(async (registration) => {
+      const subscription = await registration?.pushManager.getSubscription();
+      if (subscription) {
+        const status = await studentApi<{ enabled: boolean }>('/student/push/status', { method: 'POST', body: JSON.stringify({ endpoint: subscription.endpoint }) });
+        setEnabled(status.enabled);
+      }
+    }).catch(() => setError('Unable to check notification status.'));
+  }, []);
+  async function toggle() {
+    setBusy(true); setError('');
+    try {
+      if (!('serviceWorker' in navigator) || !('PushManager' in window) || !('Notification' in window)) throw new Error('Browser notifications are not supported on this device.');
+      const registration = await navigator.serviceWorker.register('/web-push-sw.js');
+      const current = await registration.pushManager.getSubscription();
+      if (enabled && current) {
+        await studentApi('/student/push/unsubscribe', { method: 'POST', body: JSON.stringify({ endpoint: current.endpoint }) });
+        if (!await current.unsubscribe()) throw new Error('Could not unsubscribe this browser. Please try again.');
+        setEnabled(false);
+      } else {
+        if (await Notification.requestPermission() !== 'granted') throw new Error('Notification permission was not granted.');
+        const { publicKey } = await studentApi<{ publicKey: string }>('/student/push/config');
+        const raw = atob(publicKey.replace(/-/g, '+').replace(/_/g, '/').padEnd(Math.ceil(publicKey.length / 4) * 4, '='));
+        const key = Uint8Array.from(raw, (character) => character.charCodeAt(0));
+        const subscription = current ?? await registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: key });
+        try { await studentApi('/student/push/subscription', { method: 'POST', body: JSON.stringify(subscription.toJSON()) }); }
+        catch (err) { if (!current) await subscription.unsubscribe(); throw err; }
+        setEnabled(true);
+      }
+    } catch (err) { setError(err instanceof Error ? err.message : 'Unable to update notifications.'); }
+    finally { setBusy(false); }
+  }
+  return <div><button className="secondary" type="button" disabled={busy} onClick={() => void toggle()}>{busy ? 'Updating notifications…' : enabled ? 'Turn off browser notifications' : 'Turn on browser notifications'}</button>{error && <p role="alert">{error}</p>}</div>;
+}
+
 function ThemeToggle() {
   const { theme, toggle } = useContext(ThemeContext);
   return <button className="icon theme-toggle" type="button" onClick={toggle} title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`} aria-label={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}>{theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}</button>;
@@ -312,6 +352,7 @@ function ChatPage() {
           </div>
         </div>
         <div className="chat-header-actions">
+          <BrowserNotifications />
           <ThemeToggle />
           <button className="secondary" onClick={() => navigate('/timetable')}>Timetable</button>
           <div className="chat-menu">
